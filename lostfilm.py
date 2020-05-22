@@ -1,4 +1,4 @@
-#VERSION: 1.00
+#VERSION: 0.02
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 
@@ -93,14 +93,7 @@ class lostfilm(object):
     def handle_torrents(self, href: str, code: str) -> None:
         units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB"}
 
-        #redirection_page = requests.get(
-        #    self.download_url_pattern.format(code=code),
-        #    cookies=self.session.cookies,
-        #    headers=self.headers
-        #)
-
-        cj = CookieJar()
-        opener = request.build_opener(request.HTTPCookieProcessor(cj))
+        opener = request.build_opener(request.HTTPCookieProcessor(CookieJar()))
         params = parse.urlencode(self.session.cookies)
         redirection_page = opener.open(self.download_url_pattern.format(code=code), params.encode('utf-8')).read().decode('utf-8')
 
@@ -214,7 +207,7 @@ class Session:
             with open(self.file_path, 'r') as file:
                 result = json.load(file)
 
-            if result['token'] and result['time']:
+            if result.get('token') and result.get('time'):
                 self.token = result['token']
                 self.time = self.datetime_from_string(result['time'])
 
@@ -225,19 +218,23 @@ class Session:
         login_data = {
             "act": "users",
             "type": "login",
-            "rem": 1,
+            "mail": email,
+            "pass": password,
             "need_captcha": "",
             "captcha": "",
-            "mail": email,
-            "pass": password
-        }
-        headers = {
-            'user-agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36"
+            "rem": 1
         }
 
-        response = requests.post("https://www.lostfilm.tv/ajaxik.php", login_data, headers=headers)
-        result = response.json()
+        url = "https://www.lostfilm.tv/ajaxik.php?"
+        
+        cj = CookieJar()
+        opener = request.build_opener(request.HTTPCookieProcessor(cj))
+        params = parse.urlencode(login_data)
+        response = opener.open(url, params.encode('utf-8'))
+        
+        text = response.read().decode('utf-8')
+
+        result = json.loads(text)
 
         if not login_data['mail'] or not login_data['pass']:
             self.error = 'Fill login data.'
@@ -249,19 +246,22 @@ class Session:
             self.error = 'Captcha requested.'
 
         else:
-            self.token = response.cookies['lf_session']
+            for cookie in cj:
+                if cookie.name == 'lf_session':
+                    self.token = cookie.value
+            
             self.time = datetime.now()
 
             self.save_data()
 
             return True
-
+        print(self.error)
         return False
 
     def save_data(self) -> None:
         data = {
             "token": self.token,
-            "time": self.datetime_to_string(self.time)
+            "time": self.time if not self.time else self.datetime_to_string(self.time)
         }
 
         with open(self.file_path, 'w') as file:
