@@ -1,4 +1,4 @@
-.json
+*.json
 __pycache__
 helpers.py
 novaprinter.py

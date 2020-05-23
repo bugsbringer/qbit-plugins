@@ -1,7 +1,7 @@
 # LostFilm.TV
 ### Popular Russian dubbing studio of foreign TV shows
 
-## Installation
+Installation
 ---------------
 * Save [lostfilm.py](https://raw.githubusercontent.com/bugsbringer/qbit-plugins/master/lostfilm.py) in any convenient directory
 * Open this file using **notepad** or any other **text editor**
@@ -13,7 +13,7 @@ Example:</br>
 
 * Then follow the **official tutorial**: [Install search plugins](https://github.com/qbittorrent/search-plugins/wiki/Install-search-plugins)
 
-## Unknown **seeders** and **leechers** in the search results
+Unknown **seeders** and **leechers** in the search results
 -------------------------------------------
 lostfilm.tv does not provide information about seeders and leechers, but we can get it from a torrent file.</br></br>
 You need to install additional python3 modules **bencode** and **requests**:
@@ -22,7 +22,7 @@ You need to install additional python3 modules **bencode** and **requests**:
         pip install requests
 
 It also slows down the search.
-## Errors
+Errors
 ---------
 ### Error: Captcha requested
 * You need to **logout**:

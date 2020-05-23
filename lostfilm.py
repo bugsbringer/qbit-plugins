@@ -46,12 +46,12 @@ class lostfilm(object):
 
     additional_season = 999
     all_episodes = 999
+    peer_id = None
 
     def __init__(self):
         self.session = Session()
-        self.peer_id = '-PC0001-' + ''.join([str(randint(0, 9)) for _ in range(12)])
 
-    def search(self, what: str, cat: str = 'all') -> None:
+    def search(self, what, cat='all'):
         if not self.session.is_actual:
             prettyPrinter({
                 'link': ' ',
@@ -74,7 +74,7 @@ class lostfilm(object):
             for serial in Parser(search_result).find_all('div', {'class': 'row-search'}):
                 executor.submit(self.handle_serial, serial.find('a')['href'])
 
-    def handle_serial(self, href: str) -> None:
+    def handle_serial(self, href):
         self.prevs[href] = []
         self.old_seasons[href] = 0
 
@@ -83,15 +83,16 @@ class lostfilm(object):
         with concurrent.futures.ThreadPoolExecutor() as executor:
 
             for button in Parser(serial_page).find_all('div', {'class': 'external-btn'}):
-
-                if item_button := button.attrs.get('onclick'):
+                item_button = button.attrs.get('onclick')
+                
+                if item_button:
                     code = re.search(r'\d{7,9}', item_button)[0].rjust(9, '0')
                     season, episode = int(code[3:6]), int(code[6:])
-
+                    
                     if season > self.old_seasons[href] or episode == self.all_episodes or season == self.additional_season:
                         executor.submit(self.handle_torrents, href, code)
 
-    def handle_torrents(self, href: str, code: str) -> None:
+    def handle_torrents(self, href, code):
         units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB"}
 
         opener = request.build_opener(request.HTTPCookieProcessor(CookieJar()))
@@ -99,13 +100,15 @@ class lostfilm(object):
         url = self.download_url_pattern.format(code=code)
         redir_page = opener.open(url, params).read().decode('utf-8')
 
-        if url := re.search(r'(?<=location.replace\(").+(?="\);)', redir_page):
-            
-            torrent_page = retrieve_url(url[0])
+        torrent_page_url = re.search(r'(?<=location.replace\(").+(?="\);)', redir_page)
+
+        if torrent_page_url:
+
+            torrent_page = retrieve_url(torrent_page_url[0])
 
             for torrent_tag in Parser(torrent_page).find_all('div', {'class': 'inner-box--item'}):
                 main = torrent_tag.find('div', {'class': 'inner-box--link main'}).find('a')
-                link, name = main['href'], main.text.replace('\n', '')
+                link, name = main['href'], main.text.replace('\n', ' ')
 
                 # if this url alredy handled, then all episodes of this and older
                 # seasons will have torrent urls of episode's season instead of episode
@@ -131,7 +134,7 @@ class lostfilm(object):
 
                 prettyPrinter(torrent_dict)
 
-    def get_description_url(self, href: str, code: str) -> str:
+    def get_description_url(self, href, code):
         season, episode = int(code[3:6]), int(code[6:])
 
         if season == self.additional_season:
@@ -143,7 +146,7 @@ class lostfilm(object):
         else:
             return self.episode_url_pattern.format(href=href, season=season, episode=episode)
 
-    def get_torrent_info(self, url: str) -> dict:
+    def get_torrent_info(self, url):
         if not bencode or not requests:
             return {"seeders": -1, "leechers": -1}
 
@@ -151,6 +154,9 @@ class lostfilm(object):
             torrent = bencode.bdecode(requests.get(url).content)
             info_hash = hashlib.sha1(bencode.bencode(torrent['info'])).digest()
             
+            if not self.peer_id:
+                self.peer_id = '-PC0001-' + ''.join([str(randint(0, 9)) for _ in range(12)])
+
             params = {
                 'peer_id': self.peer_id,
                 'info_hash': info_hash,
@@ -183,7 +189,7 @@ class Session:
         return os.path.join(self.storage, self.file_name)
 
     @property
-    def is_actual(self) -> bool:
+    def is_actual(self):
         """Needs to change session's token every 24 hours ot avoid captcha"""
 
         if self.token and self.time:
@@ -194,7 +200,7 @@ class Session:
             return False
 
     @property
-    def cookies(self) -> dict:
+    def cookies(self):
         if not self.is_actual:
             self.create_new()
 
@@ -203,7 +209,7 @@ class Session:
     def __init__(self):
         self.load_data()
 
-    def load_data(self) -> None:
+    def load_data(self):
         if not os.path.exists(self.file_path):
             self.create_new()
             self.save_data()
@@ -219,7 +225,7 @@ class Session:
             if not self.is_actual:
                 self.create_new()
 
-    def create_new(self) -> bool:
+    def create_new(self):
         if not EMAIL or EMAIL == "YOUR_EMAIL" or not PASSWORD or PASSWORD == 'YOUR_PASSWORD':
             self.error = 'Fill login data. {path}'.format(path=self.file_path)
 
@@ -265,7 +271,7 @@ class Session:
         
         return False
 
-    def save_data(self) -> None:
+    def save_data(self):
         data = {
             "token": self.token,
             "time": None if not self.time else self.datetime_to_string(self.time)
@@ -274,14 +280,14 @@ class Session:
         with open(self.file_path, 'w') as file:
             json.dump(data, file)
 
-    def datetime_to_string(self, dt_obj: datetime) -> str:
+    def datetime_to_string(self, dt_obj):
         if type(dt_obj) is datetime:
             return dt_obj.strftime(self.datetime_format)
 
         else:
             raise TypeError('argument must be datetime')
 
-    def datetime_from_string(self, dt_string: str) -> datetime:
+    def datetime_from_string(self, dt_string):
         if type(dt_string) is str:
             return datetime.strptime(dt_string, self.datetime_format)
 
@@ -303,12 +309,12 @@ class Tag:
 
         self.tags[tag.type].append(tag)
 
-    def find(self, tag_type: str, attrs: dict = None):
+    def find(self, tag_type, attrs=None):
         result = self.find_all(tag_type, attrs)
 
         return None if not result else result[0]
 
-    def find_all(self, tag_type: str, attrs: dict = None) -> list:
+    def find_all(self, tag_type, attrs=None):
         result = self.tags.get(tag_type, [])
 
         if attrs and result:
@@ -343,10 +349,10 @@ class Parser(HTMLParser):
     def handle_data(self, data):
        self._current_path[-1].text = data
 
-    def find(self, tag_type: str, attrs: dict = None) -> [Tag, None]:
+    def find(self, tag_type, attrs=None):
         return self._root.find(tag_type, attrs)
 
-    def find_all(self, tag_type: str, attrs: dict = None) -> list:
+    def find_all(self, tag_type, attrs=None):
         return self._root.find_all(tag_type, attrs)
 
 
