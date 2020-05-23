@@ -13,7 +13,7 @@ Example:</br>
 
 * Then follow the **official tutorial**: [Install search plugins](https://github.com/qbittorrent/search-plugins/wiki/Install-search-plugins)
 
-Unknown **seeders** and **leechers** in the search results
+Unknown **seeders** and **leechers** in the search results (*Optional*)
 -------------------------------------------
 lostfilm.tv does not provide information about seeders and leechers, but we can get it from a torrent file.</br></br>
 You need to install additional python3 modules **bencode** and **requests**:
