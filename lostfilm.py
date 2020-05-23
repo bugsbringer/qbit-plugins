@@ -296,58 +296,99 @@ class Session:
 
 
 class Tag:
-    text = None
+    text = ''
+    _representation = ''
 
     def __init__(self, tag_type, *attrs):
         self.type = tag_type
         self.attrs = {attr: value for attr, value in attrs}
         self.tags = {}
 
-    def add(self, tag):
-        if not self.tags.get(tag.type):
-            self.tags[tag.type] = []
-
-        self.tags[tag.type].append(tag)
+    def _add_subtag(self, subtag):
+        self.tags[subtag.type] = self.tags.get(subtag.type, []) + [subtag]
 
     def find(self, tag_type, attrs=None):
         result = self.find_all(tag_type, attrs)
-
         return None if not result else result[0]
 
     def find_all(self, tag_type, attrs=None):
         result = self.tags.get(tag_type, [])
 
         if attrs and result:
-            result = list(filter(lambda tag: set(attrs.items()) & set(tag.attrs.items()), result))
+            func = lambda tag: set(attrs.items()) & set(tag.attrs.items())
+            result = list(filter(func, result))
 
         return result
 
-    def __getitem__(self, attr):
-        return self.attrs[attr]
+    def __getitem__(self, key):
+        return self.attrs[key]
+
+    def __getattr__(self, tag):
+        return self.find(tag)
+
+    def __str__(self):
+        return self._representation
 
 
 class Parser(HTMLParser):
+
+    @property
+    def text(self):
+        return self._root.text
+
     def __init__(self, html_code, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self._root = Tag('doc')
+        self._root = Tag('_root')
         self._current_path = [self._root]
+        self.attrs = {}
 
         self.feed(html_code)
 
     def handle_starttag(self, tag, attrs):
         new = Tag(tag, *attrs)
-        
+
+        attrs = ' '.join(k + ('' if not v else '="{}"'.format(v)) for k, v in attrs)
+        sttag = '<{}>'.format(' '.join((tag, attrs)) if attrs else tag)
+
+        new._representation += sttag
         for tag in self._current_path:
-            tag.add(new)
-        
+            tag._add_subtag(new)
+            tag._representation += sttag
+
         self._current_path.append(new)
 
     def handle_endtag(self, tag):
+        endtag = '</{}>'.format(tag)
+        for tag in self._current_path:
+            tag._representation += endtag
+
         self._current_path.pop()
 
+    def handle_startendtag(self, tag, attrs):
+        new = Tag(tag, *attrs)
+        
+        attrs = ' '.join(k + ('' if not v else '="{}"'.format(v)) for k, v in attrs)
+        tagrepr = '<{} />'.format(' '.join((tag, attrs)) if attrs else tag)
+        
+        new._representation += tagrepr
+        for tag in self._current_path:
+            tag._add_subtag(new)
+            tag._representation += tagrepr
+
+    def handle_decl(self, decl):
+        new = Tag('declaration')
+
+        decltag = '<!{}>'.format(decl)
+        self._root._representation += decltag
+        new._representation += decltag
+
+        self._root._add_subtag(new)
+
     def handle_data(self, data):
-       self._current_path[-1].text = data
+        for tag in self._current_path:
+            tag.text += data
+            tag._representation += data
 
     def find(self, tag_type, attrs=None):
         return self._root.find(tag_type, attrs)
@@ -355,6 +396,14 @@ class Parser(HTMLParser):
     def find_all(self, tag_type, attrs=None):
         return self._root.find_all(tag_type, attrs)
 
+    def __getitem__(self, key):
+        return self.attrs[key]
+
+    def __getattr__(self, tag):
+        return self.find(tag)
+
+    def __str__(self):
+        return self._root._representation
 
 if __name__ == '__main__':
     import sys
