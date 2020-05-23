@@ -1,0 +1,6 @@
+.json
+__pycache__
+helpers.py
+novaprinter.py
+socks.py
+install.py

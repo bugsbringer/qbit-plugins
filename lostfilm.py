@@ -1,9 +1,9 @@
-#VERSION: 0.02
+#VERSION: 0.12
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 
-email = 'YOUR_EMAIL'
-password = 'YOUR_PASSWORD'
+EMAIL = 'YOUR_EMAIL'
+PASSWORD = 'YOUR_PASSWORD'
 
 
 import concurrent.futures
@@ -55,7 +55,7 @@ class lostfilm(object):
         if not self.session.is_actual:
             prettyPrinter({
                 'link': ' ',
-                'name': 'Error: {info}. Check description by right click.'.format(info=self.session.error),
+                'name': 'Error: {info}'.format(info=self.session.error),
                 'size': "0",
                 'seeds': -1,
                 'leech': -1,
@@ -83,6 +83,7 @@ class lostfilm(object):
         with concurrent.futures.ThreadPoolExecutor() as executor:
 
             for button in Parser(serial_page).find_all('div', {'class': 'external-btn'}):
+
                 if item_button := button.attrs.get('onclick'):
                     code = re.search(r'\d{7,9}', item_button)[0].rjust(9, '0')
                     season, episode = int(code[3:6]), int(code[6:])
@@ -94,10 +95,11 @@ class lostfilm(object):
         units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB"}
 
         opener = request.build_opener(request.HTTPCookieProcessor(CookieJar()))
-        params = parse.urlencode(self.session.cookies)
-        redirection_page = opener.open(self.download_url_pattern.format(code=code), params.encode('utf-8')).read().decode('utf-8')
+        params = parse.urlencode(self.session.cookies).encode('utf-8')
+        url = self.download_url_pattern.format(code=code)
+        redir_page = opener.open(url, params).read().decode('utf-8')
 
-        if url := re.search(r'(?<=location.replace\(").+(?="\);)', redirection_page):
+        if url := re.search(r'(?<=location.replace\(").+(?="\);)', redir_page):
             
             torrent_page = retrieve_url(url[0])
 
@@ -182,9 +184,12 @@ class Session:
 
     @property
     def is_actual(self) -> bool:
+        """Needs to change session's token every 24 hours ot avoid captcha"""
+
         if self.token and self.time:
             delta = datetime.now() - self.time
             return delta.days < 1
+
         else:
             return False
 
@@ -215,11 +220,16 @@ class Session:
                 self.create_new()
 
     def create_new(self) -> bool:
+        if not EMAIL or EMAIL == "YOUR_EMAIL" or not PASSWORD or PASSWORD == 'YOUR_PASSWORD':
+            self.error = 'Fill login data. {path}'.format(path=self.file_path)
+
+            return False
+
         login_data = {
             "act": "users",
             "type": "login",
-            "mail": email,
-            "pass": password,
+            "mail": EMAIL,
+            "pass": PASSWORD,
             "need_captcha": "",
             "captcha": "",
             "rem": 1
@@ -232,36 +242,33 @@ class Session:
         params = parse.urlencode(login_data)
         response = opener.open(url, params.encode('utf-8'))
         
-        text = response.read().decode('utf-8')
-
-        result = json.loads(text)
-
-        if not login_data['mail'] or not login_data['pass']:
-            self.error = 'Fill login data.'
-
-        elif 'error' in result:
+        result = json.loads(response.read().decode('utf-8'))
+        
+        if 'error' in result:
             self.error = result['error']
 
         elif 'need_captcha' in result:
-            self.error = 'Captcha requested.'
+            self.error = 'Captcha requested. Check description by right click.'
 
         else:
             for cookie in cj:
                 if cookie.name == 'lf_session':
                     self.token = cookie.value
-            
-            self.time = datetime.now()
+                    self.time = datetime.now()
 
-            self.save_data()
+                    self.save_data()
 
-            return True
-        print(self.error)
+                    return True
+
+            else:
+                self.error = 'Unknown'
+        
         return False
 
     def save_data(self) -> None:
         data = {
             "token": self.token,
-            "time": self.time if not self.time else self.datetime_to_string(self.time)
+            "time": None if not self.time else self.datetime_to_string(self.time)
         }
 
         with open(self.file_path, 'w') as file:
