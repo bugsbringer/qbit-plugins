@@ -22,9 +22,10 @@ You need to install additional python3 modules **bencode** and **requests**:
         pip install requests
 
 It also slows down the search.
+
 Errors
 ---------
-### Error: Captcha requested
+### Captcha requested
 * You need to **logout**:
     * Go to https://www.lostfilm.tv/my_logout
     * Then aprove logout
@@ -33,8 +34,8 @@ Errors
     * Enter your login data and captcha
     * And finally Log in 
 
-### Error: Fill login data
-Most likely you did not fill in the authorization data.
+### Fill login data
+* Most likely you did not fill in the authorization data.
 
-### Error: {error_code}
-Most likely you incorrectly filled in the authorization data
+### {error_code}
+* Most likely you incorrectly filled in the authorization data
