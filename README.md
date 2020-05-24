@@ -1,5 +1,5 @@
- # [qBittorrent](https://github.com/qbittorrent/qBittorrent) [search plugin](https://github.com/qbittorrent/search-plugins/wiki/Unofficial-search-plugins)
- [LostFilm.TV](https://www.lostfilm.tv/)
+ # qBittorrent search plugin
+ LostFilm.TV
  -----------
  Popular Russian dubbing studio of foreign TV shows
 
@@ -8,7 +8,7 @@ Installation
 * Save [lostfilm.py](https://raw.githubusercontent.com/bugsbringer/qbit-plugins/master/lostfilm.py) in any convenient directory
 * Open this file using **notepad** or any other **text editor**
 * Replace text in rows **EMAIL** and **PASSWORD** with **your login data**</br>
-Example:</br>
+Example:
 
         EMAIL = 'example123@gmail.com'
         PASSWORD = 'qwerty345'
@@ -22,6 +22,10 @@ You need to install additional python3 modules **bencode** and **requests**:
 
         pip install bencode.py
         pip install requests
+
+And enable it in *.py file:
+
+        ENABLE_PEERS_INFO = True
 
 It also slows down the search.
 

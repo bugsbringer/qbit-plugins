@@ -2,8 +2,10 @@
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 
-EMAIL = 'YOUR_EMAIL'
-PASSWORD = 'YOUR_PASSWORD'
+EMAIL = "YOUR_EMAIL"
+PASSWORD = "YOUR_PASSWORD"
+
+ENABLE_PEERS_INFO = False
 
 
 import concurrent.futures
@@ -20,16 +22,19 @@ from urllib import parse, request
 from helpers import retrieve_url
 from novaprinter import prettyPrinter
 
-# bencode uses to get info from torrent file about seeders, leechers
-try:
-    import bencode
-except ImportError:
-    bencode = None
+if ENABLE_PEERS_INFO:
+    # bencode uses to get info from torrent file about seeders, leechers
+    try:
+        import bencode
+    except ImportError:
+        bencode = None
+        ENABLE_PEERS_INFO = False
 
-try:
-    import requests
-except ImportError:
-    requests = None
+    try:
+        import requests
+    except ImportError:
+        requests = None
+        ENABLE_PEERS_INFO = False
 
 
 class lostfilm(object):
@@ -50,6 +55,9 @@ class lostfilm(object):
 
     def __init__(self):
         self.session = Session()
+
+        if ENABLE_PEERS_INFO:
+            self.peer_id = '-PC0001-' + ''.join([str(randint(0, 9)) for _ in range(12)])
 
     def search(self, what, cat='all'):
         if not self.session.is_actual:
@@ -147,15 +155,12 @@ class lostfilm(object):
             return self.episode_url_pattern.format(href=href, season=season, episode=episode)
 
     def get_torrent_info(self, url):
-        if not bencode or not requests:
+        if not ENABLE_PEERS_INFO:
             return {"seeders": -1, "leechers": -1}
 
         try:
             torrent = bencode.bdecode(requests.get(url).content)
             info_hash = hashlib.sha1(bencode.bencode(torrent['info'])).digest()
-            
-            if not self.peer_id:
-                self.peer_id = '-PC0001-' + ''.join([str(randint(0, 9)) for _ in range(12)])
 
             params = {
                 'peer_id': self.peer_id,
@@ -226,8 +231,8 @@ class Session:
                 self.create_new()
 
     def create_new(self):
-        if not EMAIL or EMAIL == "YOUR_EMAIL" or not PASSWORD or PASSWORD == 'YOUR_PASSWORD':
-            self.error = 'Fill login data. {path}'.format(path=self.file_path)
+        if not EMAIL or not PASSWORD :
+            self.error = 'Fill login data. {path}'.format(path=self.storage)
 
             return False
 
@@ -267,7 +272,7 @@ class Session:
                     return True
 
             else:
-                self.error = 'Unknown'
+                self.error = 'Token problem'
         
         return False
 
@@ -296,10 +301,8 @@ class Session:
 
 
 class Tag:
-    text = ''
-    _representation = ''
-
     def __init__(self, tag_type, *attrs):
+        self.text = ''
         self.type = tag_type
         self.attrs = {attr: value for attr, value in attrs}
         self.tags = {}
@@ -326,9 +329,6 @@ class Tag:
     def __getattr__(self, tag):
         return self.find(tag)
 
-    def __str__(self):
-        return self._representation
-
 
 class Parser(HTMLParser):
 
@@ -348,47 +348,25 @@ class Parser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         new = Tag(tag, *attrs)
 
-        attrs = ' '.join(k + ('' if not v else '="{}"'.format(v)) for k, v in attrs)
-        sttag = '<{}>'.format(' '.join((tag, attrs)) if attrs else tag)
-
-        new._representation += sttag
         for tag in self._current_path:
             tag._add_subtag(new)
-            tag._representation += sttag
 
         self._current_path.append(new)
 
     def handle_endtag(self, tag):
-        endtag = '</{}>'.format(tag)
-        for tag in self._current_path:
-            tag._representation += endtag
-
         self._current_path.pop()
 
     def handle_startendtag(self, tag, attrs):
         new = Tag(tag, *attrs)
-        
-        attrs = ' '.join(k + ('' if not v else '="{}"'.format(v)) for k, v in attrs)
-        tagrepr = '<{} />'.format(' '.join((tag, attrs)) if attrs else tag)
-        
-        new._representation += tagrepr
         for tag in self._current_path:
             tag._add_subtag(new)
-            tag._representation += tagrepr
 
     def handle_decl(self, decl):
-        new = Tag('declaration')
-
-        decltag = '<!{}>'.format(decl)
-        self._root._representation += decltag
-        new._representation += decltag
-
-        self._root._add_subtag(new)
+        self._root._add_subtag(Tag('declaration'))
 
     def handle_data(self, data):
         for tag in self._current_path:
             tag.text += data
-            tag._representation += data
 
     def find(self, tag_type, attrs=None):
         return self._root.find(tag_type, attrs)
@@ -402,8 +380,6 @@ class Parser(HTMLParser):
     def __getattr__(self, tag):
         return self.find(tag)
 
-    def __str__(self):
-        return self._root._representation
 
 if __name__ == '__main__':
     import sys
