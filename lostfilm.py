@@ -1,4 +1,4 @@
-#VERSION: 0.12
+#VERSION: 0.13
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 
@@ -26,18 +26,12 @@ if ENABLE_PEERS_INFO:
     # bencode uses to get info from torrent file about seeders, leechers
     try:
         import bencode
-    except ImportError:
-        bencode = None
-        ENABLE_PEERS_INFO = False
-
-    try:
         import requests
     except ImportError:
-        requests = None
         ENABLE_PEERS_INFO = False
 
 
-class lostfilm(object):
+class lostfilm:
     url = 'https://www.lostfilm.tv'
     name = 'LostFilm'
     supported_categories = {'all': '0'}
@@ -76,32 +70,41 @@ class lostfilm(object):
         self.prevs = {}
         self.old_seasons = {}
 
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            for serial_href in self.get_serials(what):
+                executor.submit(self.get_episodes, serial_href)
+
+    def get_serials(self, what):
         search_result = retrieve_url(self.search_url_pattern.format(what=request.quote(what)))
 
+        serials_tags = Parser(search_result).find_all('div', {'class': 'row-search'})
+
+        return [serial.a['href'] for serial in serials_tags]
+
+    def get_episodes(self, serial_href):
+        self.prevs[serial_href] = []
+        self.old_seasons[serial_href] = 0
+
+        serial_page = retrieve_url(self.serial_url_pattern.format(href=serial_href))
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for serial in Parser(search_result).find_all('div', {'class': 'row-search'}):
-                executor.submit(self.handle_serial, serial.find('a')['href'])
-
-    def handle_serial(self, href):
-        self.prevs[href] = []
-        self.old_seasons[href] = 0
-
-        serial_page = retrieve_url(self.serial_url_pattern.format(href=href))
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-
             for button in Parser(serial_page).find_all('div', {'class': 'external-btn'}):
                 item_button = button.attrs.get('onclick')
-                
-                if item_button:
-                    code = re.search(r'\d{7,9}', item_button)[0].rjust(9, '0')
-                    season, episode = int(code[3:6]), int(code[6:])
-                    
-                    if season > self.old_seasons[href] or episode == self.all_episodes or season == self.additional_season:
-                        executor.submit(self.handle_torrents, href, code)
 
-    def handle_torrents(self, href, code):
-        units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB"}
+                if item_button:
+                    episode_code = re.search(r'\d{7,9}', item_button)[0].rjust(9, '0')
+                    executor.submit(self.get_torrents, serial_href, episode_code)   
+
+    def get_torrents(self, href, code):
+        season, episode = int(code[3:6]), int(code[6:])
+
+        torrent_rules = [
+            season > self.old_seasons[href],
+            episode == self.all_episodes,
+            season == self.additional_season
+        ]
+
+        if not any(torrent_rules):
+            return
 
         opener = request.build_opener(request.HTTPCookieProcessor(CookieJar()))
         params = parse.urlencode(self.session.cookies).encode('utf-8')
@@ -109,38 +112,46 @@ class lostfilm(object):
         redir_page = opener.open(url, params).read().decode('utf-8')
 
         torrent_page_url = re.search(r'(?<=location.replace\(").+(?="\);)', redir_page)
+        
+        if not torrent_page_url:
+            return
 
-        if torrent_page_url:
+        torrent_page = retrieve_url(torrent_page_url[0])
+        desc_link = self.get_description_url(href, code)
 
-            torrent_page = retrieve_url(torrent_page_url[0])
+        units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB"}
 
-            for torrent_tag in Parser(torrent_page).find_all('div', {'class': 'inner-box--item'}):
-                main = torrent_tag.find('div', {'class': 'inner-box--link main'}).find('a')
-                link, name = main['href'], main.text.replace('\n', ' ')
+        torrent_dicts = []
+        for torrent_tag in Parser(torrent_page).find_all('div', {'class': 'inner-box--item'}):
+            main = torrent_tag.find('div', {'class': 'inner-box--link main'}).a
+            link, name = main['href'], main.text.replace('\n', ' ')
+            
+            # if this url alredy handled, then all episodes of this and older
+            # seasons will have torrent urls of episode's season instead of episode
+            if link in self.prevs[href]:
+                self.old_seasons[href] = max(self.old_seasons[href], season)
+                break
+            
+            self.prevs[href].append(link)
 
-                # if this url alredy handled, then all episodes of this and older
-                # seasons will have torrent urls of episode's season instead of episode
-                if link in self.prevs[href]:
-                    self.old_seasons[href] = max(self.old_seasons[href], int(code[3:6]))
-                    break
+            desc_box_text = torrent_tag.find('div', {'class': 'inner-box--desc'}).text
+            size, unit = re.search(r'\d+.\d+ \w\w(?=\.)', desc_box_text)[0].split()
 
-                self.prevs[href].append(link)
+            torrent_dicts.append({
+                'link': link,
+                'name': name,
+                'size': ' '.join((size, units_dict.get(unit, ''))),
+                'seeds': -1,
+                'leech': -1,
+                'engine_url': self.url,
+                'desc_link': desc_link
+            })
 
-                size, unit = re.search(r'\d+.\d+ \w\w(?=\.)', torrent_tag.find(
-                    'div', {'class': 'inner-box--desc'}).text)[0].split()
-                torrent_info = self.get_torrent_info(link)
+        if ENABLE_PEERS_INFO:
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                torrent_dicts = executor.map(self.get_torrent_info, torrent_dicts)
 
-                torrent_dict = {
-                    'link': link,
-                    'name': name,
-                    'size': ' '.join([size, units_dict.get(unit, '')]),
-                    'seeds': torrent_info['seeders'],
-                    'leech': torrent_info['leechers'],
-                    'engine_url': self.url,
-                    'desc_link': self.get_description_url(href, code)
-                }
-
-                prettyPrinter(torrent_dict)
+        [prettyPrinter(tdict) for tdict in torrent_dicts]
 
     def get_description_url(self, href, code):
         season, episode = int(code[3:6]), int(code[6:])
@@ -154,30 +165,26 @@ class lostfilm(object):
         else:
             return self.episode_url_pattern.format(href=href, season=season, episode=episode)
 
-    def get_torrent_info(self, url):
-        if not ENABLE_PEERS_INFO:
-            return {"seeders": -1, "leechers": -1}
+    def get_torrent_info(self, tdict):
+        torrent = bencode.bdecode(requests.get(tdict['link']).content)
+        info_hash = hashlib.sha1(bencode.bencode(torrent['info'])).digest()
 
-        try:
-            torrent = bencode.bdecode(requests.get(url).content)
-            info_hash = hashlib.sha1(bencode.bencode(torrent['info'])).digest()
+        params = {
+            'peer_id': self.peer_id,
+            'info_hash': info_hash,
+            'port': 6881,
+            'left': 200075,
+            'downloaded': 0,
+            'uploaded': 0,
+            'compact': 1
+        }
 
-            params = {
-                'peer_id': self.peer_id,
-                'info_hash': info_hash,
-                'port': 6881,
-                'left': 200075,
-                'downloaded': 0,
-                'uploaded': 0,
-                'compact': 1
-            }
+        data = bencode.bdecode(requests.get(torrent['announce'], params).content)
 
-            data = bencode.bdecode(requests.get(torrent['announce'], params).content)
+        tdict['seeds'] = data.get('complete', -1)
+        tdict['leech'] = data.get('incomplete', 0) - 1
 
-            return {"seeders": data['complete'], "leechers": data['incomplete'] - 1}
-
-        except:
-            return {"seeders": -1, "leechers": -1}
+        return tdict
 
 
 class Session:

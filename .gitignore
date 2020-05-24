@@ -1,5 +1,6 @@
 *.json
 __pycache__
+.vscode
 helpers.py
 novaprinter.py
 socks.py
