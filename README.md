@@ -1,5 +1,7 @@
-# LostFilm.TV
-### Popular Russian dubbing studio of foreign TV shows
+ # [qBittorrent](https://github.com/qbittorrent/qBittorrent) [search plugin](https://github.com/qbittorrent/search-plugins/wiki/Unofficial-search-plugins)
+ [LostFilm.TV](https://www.lostfilm.tv/)
+ -----------
+ Popular Russian dubbing studio of foreign TV shows
 
 Installation
 ---------------
