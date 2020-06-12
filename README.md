@@ -1,36 +1,44 @@
  # qBittorrent search plugin
- LostFilm.TV
- -----------
- Popular Russian dubbing studio of foreign TV shows
+
+This file also has [Russian translation](https://raw.githubusercontent.com/bugsbringer/qbit-plugins/master/README.ru.md)
+
+LostFilm.TV
+-----------
+Popular Russian dubbing studio of foreign TV shows
 
 Installation
----------------
+------------
 * Save [lostfilm.py](https://raw.githubusercontent.com/bugsbringer/qbit-plugins/master/lostfilm.py) in any convenient directory
 * Open this file using **notepad** or any other **text editor**
-* Replace text in rows **EMAIL** and **PASSWORD** with **your login data**</br>
+* Replace text in rows **EMAIL** and **PASSWORD** with **your login data**<br>
 Example:
 
-        EMAIL = 'example123@gmail.com'
-        PASSWORD = 'qwerty345'
+        EMAIL = "example123@gmail.com"
+        PASSWORD = "qwerty345"
 
 * Then follow the **official tutorial**: [Install search plugins](https://github.com/qbittorrent/search-plugins/wiki/Install-search-plugins)
 
-Unknown **seeders** and **leechers** in the search results (*Optional*)
--------------------------------------------
-lostfilm.tv does not provide information about seeders and leechers, but we can get it from a torrent file.</br></br>
-You need to install additional python3 modules **bencode** and **requests**:
+Features
+--------
+* Information about seeders and leechers in search results. (Reduces search speed)<br>
+        You can disable this functionality in lostfilm.py file:
 
-        pip install bencode.py
-        pip install requests
+        ENABLE_PEERS_INFO = False
 
-And enable it in *.py file:
+* Additional search queries:<br>
+*just enter it in search field*
+    * Favorites serials:
+        
+            @fav
 
-        ENABLE_PEERS_INFO = True
-
-It also slows down the search.
+    * New episodes:
+        * Among all or favorites in the last 7 days:
+        
+                @new
+                @new:fav
 
 Errors
----------
+------
 ### Captcha requested
 * You need to **logout**:
     * Go to https://www.lostfilm.tv/my_logout

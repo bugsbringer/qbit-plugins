@@ -5,30 +5,25 @@
 EMAIL = "YOUR_EMAIL"
 PASSWORD = "YOUR_PASSWORD"
 
-ENABLE_PEERS_INFO = False
+ENABLE_PEERS_INFO = True
 
+from bs4 import BeautifulSoup
 
 import concurrent.futures
 import hashlib
 import json
 import os
 import re
+from collections import OrderedDict
 from datetime import datetime
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar
+from io import BytesIO
 from random import randint
 from urllib import parse, request
 
 from helpers import retrieve_url
 from novaprinter import prettyPrinter
-
-if ENABLE_PEERS_INFO:
-    # bencode uses to get info from torrent file about seeders, leechers
-    try:
-        import bencode
-        import requests
-    except ImportError:
-        ENABLE_PEERS_INFO = False
 
 
 class lostfilm:
@@ -42,16 +37,30 @@ class lostfilm:
     season_url_pattern = 'https://www.lostfilm.tv{href}/season_{season}'
     episode_url_pattern = 'https://www.lostfilm.tv{href}/season_{season}/episode_{episode}/'
     additional_url_pattern = 'https://www.lostfilm.tv{href}/additional/episode_{episode}/'
+    new_url_pattern = "https://www.lostfilm.tv/new/page_{page}/type_{type}"
 
     additional_season = 999
     all_episodes = 999
     peer_id = None
+
+    datetime_format = '%d.%m.%Y'
 
     def __init__(self):
         self.session = Session()
 
         if ENABLE_PEERS_INFO:
             self.peer_id = '-PC0001-' + ''.join([str(randint(0, 9)) for _ in range(12)])
+
+    def pretty_log(self, data):
+        prettyPrinter({
+            'link': ' ',
+            'name': str(data),
+            'size': "0",
+            'seeds': -1,
+            'leech': -1,
+            'engine_url': self.url,
+            'desc_link': 'https://www.lostfilm.tv'
+        })
 
     def search(self, what, cat='all'):
         if not self.session.is_actual:
@@ -69,10 +78,92 @@ class lostfilm:
 
         self.prevs = {}
         self.old_seasons = {}
+        
+        if parse.unquote(what).startswith('@'): 
+            params = parse.unquote(what)[1:].split(':')
+            
+            if params:
+                if params[0] == 'fav':
+                    self.get_fav()
+
+                elif params[0] == 'new':
+                    if len(params) == 1:
+                        self.get_new()
+
+                    elif len(params) == 2 and params[1] == 'fav':
+                        self.get_new(fav=True)
+
+        else:
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                for serial_href in self.get_serials(what):
+                    executor.submit(self.get_episodes, serial_href)
+
+    def get_new(self, fav=False, days=7):
+        today = datetime.now().date()
+
+        self.dates = {}
+
+        page_number = 1
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for serial_href in self.get_serials(what):
-                executor.submit(self.get_episodes, serial_href)
+            while True:
+                opener = request.build_opener(request.HTTPCookieProcessor(CookieJar()))
+                params = parse.urlencode(self.session.cookies).encode('utf-8')
+                url = self.new_url_pattern.format(page=page_number, type=99 if fav else 0)
+                page = opener.open(url, params).read().decode('utf-8')
+
+                for row in Parser(page).find_all('div', {'class': 'row'}):
+                    
+                    release_date_str = row.find_all('div', {'class': 'alpha'})[1].text
+                    release_date_str = re.search(r'\d{2}.\d{2}.\d{4}', release_date_str)[0]
+                    release_date = datetime.strptime(release_date_str, self.datetime_format).date()
+
+                    delta = today - release_date
+
+                    if delta.days > days:
+                        return
+
+                    href = '/'.join(row.a['href'].split('/')[:3])
+
+                    haveseen_btn = row.find('div', {'onclick': 'markEpisodeAsWatched(this);'})
+                    episode_code = haveseen_btn['data-episode'].rjust(9, '0')
+
+                    self.dates[episode_code] = release_date_str
+                    
+                    executor.submit(self.get_torrents, href, episode_code, True)
+                else: 
+                    break
+
+                page_number += 1
+
+    def get_fav(self):
+        opener = request.build_opener(request.HTTPCookieProcessor(CookieJar()))
+        cookies = parse.urlencode(self.session.cookies).encode('utf-8')
+
+        url = "https://www.lostfilm.tv/my/type_1"
+        page = opener.open(url, cookies).read().decode('utf-8')
+
+        fav_count = len(Parser(page).find_all('div', {'class': 'serial-box'})) // 10 * 10
+
+        params = {
+            'act': 'serial',
+            'type': 'search',
+            'o': 0,
+            's': 3,
+            't': 99
+        }
+
+        url = "https://www.lostfilm.tv/ajaxik.php?"
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            for count in range(0, fav_count, 10):
+            
+                params['o'] = count
+                url += parse.urlencode(params)
+                result = json.loads(opener.open(url, cookies).read().decode('utf-8'))
+
+                for serial in result['data']:
+                    executor.submit(self.get_episodes, serial['link'])
 
     def get_serials(self, what):
         search_result = retrieve_url(self.search_url_pattern.format(what=request.quote(what)))
@@ -92,19 +183,20 @@ class lostfilm:
 
                 if item_button:
                     episode_code = re.search(r'\d{7,9}', item_button)[0].rjust(9, '0')
-                    executor.submit(self.get_torrents, serial_href, episode_code)   
+                    executor.submit(self.get_torrents, serial_href, episode_code)
 
-    def get_torrents(self, href, code):
+    def get_torrents(self, href, code, new_episodes=False):
         season, episode = int(code[3:6]), int(code[6:])
 
-        torrent_rules = [
-            season > self.old_seasons[href],
-            episode == self.all_episodes,
-            season == self.additional_season
-        ]
+        if not new_episodes:
+            rules = [
+                season > self.old_seasons[href],
+                episode == self.all_episodes,
+                season == self.additional_season
+            ]
 
-        if not any(torrent_rules):
-            return
+            if not any(rules):
+                return
 
         opener = request.build_opener(request.HTTPCookieProcessor(CookieJar()))
         params = parse.urlencode(self.session.cookies).encode('utf-8')
@@ -112,7 +204,7 @@ class lostfilm:
         redir_page = opener.open(url, params).read().decode('utf-8')
 
         torrent_page_url = re.search(r'(?<=location.replace\(").+(?="\);)', redir_page)
-        
+
         if not torrent_page_url:
             return
 
@@ -126,13 +218,17 @@ class lostfilm:
             main = torrent_tag.find('div', {'class': 'inner-box--link main'}).a
             link, name = main['href'], main.text.replace('\n', ' ')
             
-            # if this url alredy handled, then all episodes of this and older
-            # seasons will have torrent urls of episode's season instead of episode
-            if link in self.prevs[href]:
-                self.old_seasons[href] = max(self.old_seasons[href], season)
-                break
-            
-            self.prevs[href].append(link)
+            if not new_episodes:
+                
+                if link in self.prevs[href]:
+                    # if this url alredy handled, then all episodes of this and older
+                    # seasons will have torrent urls of episode's season instead of episode
+                    self.old_seasons[href] = max(self.old_seasons[href], season)
+                    break
+                
+                self.prevs[href].append(link)
+            else:
+                name = name + ' [' + self.dates[code] + ']'
 
             desc_box_text = torrent_tag.find('div', {'class': 'inner-box--desc'}).text
             size, unit = re.search(r'\d+.\d+ \w\w(?=\.)', desc_box_text)[0].split()
@@ -149,9 +245,10 @@ class lostfilm:
 
         if ENABLE_PEERS_INFO:
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                torrent_dicts = executor.map(self.get_torrent_info, torrent_dicts)
+                [prettyPrinter(tdict) for tdict in executor.map(self.get_torrent_info, torrent_dicts)]
 
-        [prettyPrinter(tdict) for tdict in torrent_dicts]
+        else:
+            [prettyPrinter(tdict) for tdict in torrent_dicts]
 
     def get_description_url(self, href, code):
         season, episode = int(code[3:6]), int(code[6:])
@@ -166,8 +263,10 @@ class lostfilm:
             return self.episode_url_pattern.format(href=href, season=season, episode=episode)
 
     def get_torrent_info(self, tdict):
-        torrent = bencode.bdecode(requests.get(tdict['link']).content)
-        info_hash = hashlib.sha1(bencode.bencode(torrent['info'])).digest()
+        req = request.Request(tdict['link'])
+
+        torrent = bdecode(request.urlopen(req).read())
+        info_hash = hashlib.sha1(bencode(torrent[b'info'])).digest()
 
         params = {
             'peer_id': self.peer_id,
@@ -179,10 +278,13 @@ class lostfilm:
             'compact': 1
         }
 
-        data = bencode.bdecode(requests.get(torrent['announce'], params).content)
+        opener = request.build_opener()
+        response = opener.open(torrent[b'announce'].decode('utf-8') + '?' + parse.urlencode(params))
 
-        tdict['seeds'] = data.get('complete', -1)
-        tdict['leech'] = data.get('incomplete', 0) - 1
+        data = bdecode(response.read())
+
+        tdict['seeds'] = data.get(b'complete', -1)
+        tdict['leech'] = data.get(b'incomplete', 0) - 1
 
         return tdict
 
@@ -319,13 +421,23 @@ class Tag:
 
     def find(self, tag_type, attrs=None):
         result = self.find_all(tag_type, attrs)
+        
         return None if not result else result[0]
 
     def find_all(self, tag_type, attrs=None):
-        result = self.tags.get(tag_type, [])
+        result = self.tags.get(tag_type)
 
         if attrs and result:
-            func = lambda tag: set(attrs.items()) & set(tag.attrs.items())
+            def func(tag):
+                if not set(attrs.keys()) <= set(tag.attrs.keys()):
+                    return False
+
+                for attr in attrs.keys():
+                    if not set(attrs[attr].split()) <= set(tag.attrs[attr].split()):
+                        return False
+                
+                return True
+
             result = list(filter(func, result))
 
         return result
@@ -343,12 +455,15 @@ class Parser(HTMLParser):
     def text(self):
         return self._root.text
 
+    @property
+    def attrs(self):
+        return self._root.attrs
+
     def __init__(self, html_code, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self._root = Tag('_root')
         self._current_path = [self._root]
-        self.attrs = {}
 
         self.feed(html_code)
 
@@ -388,8 +503,91 @@ class Parser(HTMLParser):
         return self.find(tag)
 
 
+class InvalidBencode(Exception):
+    @classmethod
+    def at_position(cls, error, position):
+        return cls("%s at position %i" % (error, position))
+
+    @classmethod
+    def eof(cls):
+        return cls("EOF reached while parsing")
+
+
+def bencode(value):
+    if isinstance(value, dict):
+        return b'd%be' % b''.join([bencode(k) + bencode(v) for k, v in value.items()])
+    if isinstance(value, list) or isinstance(value, tuple):
+        return b'l%be' % b''.join([bencode(v) for v in value])
+    if isinstance(value, int):
+        return b'i%ie' % value
+    if isinstance(value, bytes):
+        return b'%i:%b' % (len(value), value)
+
+    raise ValueError("Only int, bytes, list or dict can be encoded, got %s" % type(value).__name__)
+
+
+def bdecode(data):
+    return decode_from_io(BytesIO(data))
+
+
+def decode_from_io(f):
+    char = f.read(1)
+    if char == b'd':
+        dict_ = OrderedDict()
+        while True:
+            position = f.tell()
+            char = f.read(1)
+            if char == b'e':
+                return dict_
+            if char == b'':
+                raise InvalidBencode.eof()
+
+            f.seek(position)
+            key = decode_from_io(f)
+            dict_[key] = decode_from_io(f)
+
+    if char == b'l':
+        list_ = []
+        while True:
+            position = f.tell()
+            char = f.read(1)
+            if char == b'e':
+                return list_
+            if char == b'':
+                raise InvalidBencode.eof()
+            f.seek(position)
+            list_.append(decode_from_io(f))
+
+    if char == b'i':
+        digits = b''
+        while True:
+            char = f.read(1)
+            if char == b'e':
+                break
+            if char == b'':
+                raise InvalidBencode.eof()
+            if not char.isdigit():
+                raise InvalidBencode.at_position('Expected int, got %s' % str(char), f.tell())
+            digits += char
+        return int(digits)
+
+    if char.isdigit():
+        digits = char
+        while True:
+            char = f.read(1)
+            if char == b':':
+                break
+            if char == b'':
+                raise InvalidBencode
+            digits += char
+        length = int(digits)
+        string = f.read(length)
+        return string
+
+    raise InvalidBencode.at_position('Unknown type : %s' % char, f.tell())
+
+
 if __name__ == '__main__':
     import sys
 
-    lf = lostfilm()
-    lf.search(' '.join(sys.argv[1:]))
+    lostfilm().search(' '.join(sys.argv[1:]))
