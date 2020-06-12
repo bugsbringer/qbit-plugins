@@ -143,7 +143,7 @@ class lostfilm:
         url = "https://www.lostfilm.tv/my/type_1"
         page = opener.open(url, cookies).read().decode('utf-8')
 
-        fav_count = len(Parser(page).find_all('div', {'class': 'serial-box'})) // 10 * 10
+        fav_count = len(Parser(page).find_all('div', {'class': 'serial-box'})) // 10 * 11
 
         params = {
             'act': 'serial',
