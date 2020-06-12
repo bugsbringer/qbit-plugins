@@ -7,7 +7,6 @@ PASSWORD = "YOUR_PASSWORD"
 
 ENABLE_PEERS_INFO = True
 
-from bs4 import BeautifulSoup
 
 import concurrent.futures
 import hashlib
