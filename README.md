@@ -1,6 +1,6 @@
  # qBittorrent search plugin
 
-This file also has [Russian translation](https://raw.githubusercontent.com/bugsbringer/qbit-plugins/master/README.ru.md)
+This file also has [Russian translation](https://github.com/bugsbringer/qbit-plugins/blob/master/README.ru.md)
 
 LostFilm.TV
 -----------
