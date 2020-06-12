@@ -111,7 +111,12 @@ class lostfilm:
                 url = self.new_url_pattern.format(page=page_number, type=99 if fav else 0)
                 page = opener.open(url, params).read().decode('utf-8')
 
-                for row in Parser(page).find_all('div', {'class': 'row'}):
+                rows = Parser(page).find_all('div', {'class': 'row'})
+
+                if not rows:
+                    break
+
+                for row in rows:
                     
                     release_date_str = row.find_all('div', {'class': 'alpha'})[1].text
                     release_date_str = re.search(r'\d{2}.\d{2}.\d{4}', release_date_str)[0]
@@ -130,8 +135,7 @@ class lostfilm:
                     self.dates[episode_code] = release_date_str
                     
                     executor.submit(self.get_torrents, href, episode_code, True)
-                else: 
-                    break
+                
 
                 page_number += 1
 
