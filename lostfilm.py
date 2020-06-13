@@ -1,4 +1,4 @@
-#VERSION: 0.13
+#VERSION: 0.14
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 
@@ -146,8 +146,8 @@ class lostfilm:
         url = "https://www.lostfilm.tv/my/type_1"
         page = opener.open(url, cookies).read().decode('utf-8')
 
-        fav_count = len(Parser(page).find_all('div', {'class': 'serial-box'})) // 10 * 11
-
+        fav_count = len(Parser(page).find_all('div', {'class': 'serial-box'}))
+        
         params = {
             'act': 'serial',
             'type': 'search',
@@ -266,28 +266,31 @@ class lostfilm:
             return self.episode_url_pattern.format(href=href, season=season, episode=episode)
 
     def get_torrent_info(self, tdict):
-        req = request.Request(tdict['link'])
+        try:
+            req = request.Request(tdict['link'])
 
-        torrent = bdecode(request.urlopen(req).read())
-        info_hash = hashlib.sha1(bencode(torrent[b'info'])).digest()
+            torrent = bdecode(request.urlopen(req).read())
+            info_hash = hashlib.sha1(bencode(torrent[b'info'])).digest()
 
-        params = {
-            'peer_id': self.peer_id,
-            'info_hash': info_hash,
-            'port': 6881,
-            'left': 200075,
-            'downloaded': 0,
-            'uploaded': 0,
-            'compact': 1
-        }
+            params = {
+                'peer_id': self.peer_id,
+                'info_hash': info_hash,
+                'port': 6881,
+                'left': 200075,
+                'downloaded': 0,
+                'uploaded': 0,
+                'compact': 1
+            }
 
-        opener = request.build_opener()
-        response = opener.open(torrent[b'announce'].decode('utf-8') + '?' + parse.urlencode(params))
+            opener = request.build_opener()
+            response = opener.open(torrent[b'announce'].decode('utf-8') + '?' + parse.urlencode(params))
 
-        data = bdecode(response.read())
+            data = bdecode(response.read())
 
-        tdict['seeds'] = data.get(b'complete', -1)
-        tdict['leech'] = data.get(b'incomplete', 0) - 1
+            tdict['seeds'] = data.get(b'complete', -1)
+            tdict['leech'] = data.get(b'incomplete', 0) - 1
+        except Exception as exp:
+            self.pretty_log(exp)
 
         return tdict
 
