@@ -4,4 +4,5 @@ __pycache__
 helpers.py
 novaprinter.py
 socks.py
-install.py
+install_lf.py
+install_dl.py
