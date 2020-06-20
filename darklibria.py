@@ -1,3 +1,6 @@
+#VERSION: 0.10
+#AUTHORS: Bugsbringer (dastins193@gmail.com)
+
 import concurrent.futures
 import re
 from html.parser import HTMLParser
