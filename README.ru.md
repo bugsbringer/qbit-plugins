@@ -1,7 +1,13 @@
- # Поисковой плагин для qBittorrent
+ # qBittorrent плагины
+
+Плагины
+-----------
+* LostFilm.TV
+* dark-libria.it
 
 Установка
 ------------
+1.Для приватных торрент-трекеров(LostFilm):
 * Сохраните [lostfilm.py](https://raw.githubusercontent.com/bugsbringer/qbit-plugins/master/lostfilm.py) в любую удобную директорию
 * Откройте файл при помощи **блокнота** или другого **текстового редактора**
 * Замените текст в строках **EMAIL** и **PASSWORD**  **своими данными для входа на сайт**<br>
@@ -10,9 +16,9 @@
         EMAIL = "example123@gmail.com"
         PASSWORD = "qwerty345"
 
-* Далее следуйте **официальному руководству**: [Install search plugins](https://github.com/qbittorrent/search-plugins/wiki/Install-search-plugins)
+2.Следуйте **официальному руководству**: [Install search plugins](https://github.com/qbittorrent/search-plugins/wiki/Install-search-plugins)
 
-Особенности
+Особенности плагина LostFilm
 --------
 * Информация о сидах и личах в результатах поиска. (Замедляет поиск)<br>
         Вы можете отключить эту функцию в lostfilm.py файле:

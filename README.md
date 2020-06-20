@@ -1,13 +1,15 @@
- # qBittorrent search plugin
+ # qBittorrent search plugins
 
 This file also has [Russian translation](https://github.com/bugsbringer/qbit-plugins/blob/master/README.ru.md)
 
-LostFilm.TV
+Plugins
 -----------
-Popular Russian dubbing studio of foreign TV shows
+* LostFilm.TV
+* dark-libria.it
 
 Installation
 ------------
+1.For private torrent-trackers(LostFilm):
 * Save [lostfilm.py](https://raw.githubusercontent.com/bugsbringer/qbit-plugins/master/lostfilm.py) in any convenient directory
 * Open this file using **notepad** or any other **text editor**
 * Replace text in rows **EMAIL** and **PASSWORD** with **your login data**<br>
@@ -16,9 +18,9 @@ Example:
         EMAIL = "example123@gmail.com"
         PASSWORD = "qwerty345"
 
-* Then follow the **official tutorial**: [Install search plugins](https://github.com/qbittorrent/search-plugins/wiki/Install-search-plugins)
+2.Follow the **official tutorial**: [Install search plugins](https://github.com/qbittorrent/search-plugins/wiki/Install-search-plugins)
 
-Features
+LostFilm plugin features
 --------
 * Information about seeders and leechers in search results. (Reduces search speed)<br>
         You can disable this functionality in lostfilm.py file:
