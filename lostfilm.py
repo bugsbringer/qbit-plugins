@@ -1,4 +1,4 @@
-#VERSION: 0.14
+#VERSION: 0.15
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 
@@ -140,33 +140,17 @@ class lostfilm:
                 page_number += 1
 
     def get_fav(self):
+        url = "https://www.lostfilm.tv/my/type_1"
         opener = request.build_opener(request.HTTPCookieProcessor(CookieJar()))
         cookies = parse.urlencode(self.session.cookies).encode('utf-8')
 
-        url = "https://www.lostfilm.tv/my/type_1"
         page = opener.open(url, cookies).read().decode('utf-8')
 
-        fav_count = len(Parser(page).find_all('div', {'class': 'serial-box'}))
-        
-        params = {
-            'act': 'serial',
-            'type': 'search',
-            'o': 0,
-            's': 3,
-            't': 99
-        }
-
-        url = "https://www.lostfilm.tv/ajaxik.php?"
-
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for count in range(0, fav_count, 10):
-            
-                params['o'] = count
-                url += parse.urlencode(params)
-                result = json.loads(opener.open(url, cookies).read().decode('utf-8'))
 
-                for serial in result['data']:
-                    executor.submit(self.get_episodes, serial['link'])
+            for serial in Parser(page).find_all('div', {'class': 'serial-box'}):
+                href = serial.find('a', {'class': 'body'})['href']
+                executor.submit(self.get_episodes, href)
 
     def get_serials(self, what):
         search_result = retrieve_url(self.search_url_pattern.format(what=request.quote(what)))
@@ -290,7 +274,8 @@ class lostfilm:
             tdict['seeds'] = data.get(b'complete', -1)
             tdict['leech'] = data.get(b'incomplete', 0) - 1
         except Exception as exp:
-            self.pretty_log(exp)
+            if __name__ == '__main__':
+                self.pretty_log(exp)
 
         return tdict
 

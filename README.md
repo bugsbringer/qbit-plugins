@@ -1,6 +1,6 @@
  # qBittorrent search plugins
 
-This file also has [Russian translation](https://github.com/bugsbringer/qbit-plugins/blob/master/README.ru.md)
+[Readme in russian](https://github.com/bugsbringer/qbit-plugins/blob/master/README.ru.md)
 
 Plugins
 -----------
@@ -10,7 +10,7 @@ Plugins
 Installation
 ------------
 1.For private torrent-trackers(LostFilm):
-* Save [lostfilm.py](https://raw.githubusercontent.com/bugsbringer/qbit-plugins/master/lostfilm.py) in any convenient directory
+* Save *.py file in any convenient directory
 * Open this file using **notepad** or any other **text editor**
 * Replace text in rows **EMAIL** and **PASSWORD** with **your login data**<br>
 Example:
