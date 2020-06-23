@@ -1,4 +1,4 @@
-#VERSION: 0.15
+#VERSION: 0.16
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 
@@ -40,15 +40,12 @@ class lostfilm:
 
     additional_season = 999
     all_episodes = 999
-    peer_id = None
+    peer_id = '-PC0001-' + ''.join([str(randint(0, 9)) for _ in range(12)])
 
     datetime_format = '%d.%m.%Y'
 
     def __init__(self):
         self.session = Session()
-
-        if ENABLE_PEERS_INFO:
-            self.peer_id = '-PC0001-' + ''.join([str(randint(0, 9)) for _ in range(12)])
 
     def pretty_log(self, data):
         prettyPrinter({
@@ -63,15 +60,7 @@ class lostfilm:
 
     def search(self, what, cat='all'):
         if not self.session.is_actual:
-            prettyPrinter({
-                'link': ' ',
-                'name': 'Error: {info}'.format(info=self.session.error),
-                'size': "0",
-                'seeds': -1,
-                'leech': -1,
-                'engine_url': self.url,
-                'desc_link': 'https://www.lostfilm.tv/login'
-            })
+            self.pretty_log(self.session.error)
 
             return
 
@@ -93,22 +82,27 @@ class lostfilm:
                         self.get_new(fav=True)
 
         else:
+            search_result = retrieve_url(self.search_url_pattern.format(what=request.quote(what)))
+            serials_tags = Parser(search_result).find_all('div', {'class': 'row-search'})
+
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                for serial_href in self.get_serials(what):
+                for serial_href in (serial.a['href'] for serial in serials_tags):
                     executor.submit(self.get_episodes, serial_href)
 
     def get_new(self, fav=False, days=7):
+        type = 99 if fav else 0
         today = datetime.now().date()
 
         self.dates = {}
 
         page_number = 1
 
+        opener = request.build_opener()
+        params = parse.urlencode(self.session.cookies).encode('utf-8')
+
         with concurrent.futures.ThreadPoolExecutor() as executor:
             while True:
-                opener = request.build_opener(request.HTTPCookieProcessor(CookieJar()))
-                params = parse.urlencode(self.session.cookies).encode('utf-8')
-                url = self.new_url_pattern.format(page=page_number, type=99 if fav else 0)
+                url = self.new_url_pattern.format(page=page_number, type=type)
                 page = opener.open(url, params).read().decode('utf-8')
 
                 rows = Parser(page).find_all('div', {'class': 'row'})
@@ -136,12 +130,11 @@ class lostfilm:
                     
                     executor.submit(self.get_torrents, href, episode_code, True)
                 
-
                 page_number += 1
 
     def get_fav(self):
         url = "https://www.lostfilm.tv/my/type_1"
-        opener = request.build_opener(request.HTTPCookieProcessor(CookieJar()))
+        opener = request.build_opener()
         cookies = parse.urlencode(self.session.cookies).encode('utf-8')
 
         page = opener.open(url, cookies).read().decode('utf-8')
@@ -151,13 +144,6 @@ class lostfilm:
             for serial in Parser(page).find_all('div', {'class': 'serial-box'}):
                 href = serial.find('a', {'class': 'body'})['href']
                 executor.submit(self.get_episodes, href)
-
-    def get_serials(self, what):
-        search_result = retrieve_url(self.search_url_pattern.format(what=request.quote(what)))
-
-        serials_tags = Parser(search_result).find_all('div', {'class': 'row-search'})
-
-        return [serial.a['href'] for serial in serials_tags]
 
     def get_episodes(self, serial_href):
         self.prevs[serial_href] = []
@@ -185,11 +171,11 @@ class lostfilm:
             if not any(rules):
                 return
 
+        url = self.download_url_pattern.format(code=code)
+
         opener = request.build_opener(request.HTTPCookieProcessor(CookieJar()))
         params = parse.urlencode(self.session.cookies).encode('utf-8')
-        url = self.download_url_pattern.format(code=code)
         redir_page = opener.open(url, params).read().decode('utf-8')
-
         torrent_page_url = re.search(r'(?<=location.replace\(").+(?="\);)', redir_page)
 
         if not torrent_page_url:
@@ -208,14 +194,14 @@ class lostfilm:
             if not new_episodes:
                 
                 if link in self.prevs[href]:
-                    # if this url alredy handled, then all episodes of this and older
-                    # seasons will have torrent urls of episode's season instead of episode
                     self.old_seasons[href] = max(self.old_seasons[href], season)
                     break
                 
                 self.prevs[href].append(link)
             else:
-                name = name + ' [' + self.dates[code] + ']'
+                date = self.dates.pop(code, None)
+                if date:
+                    name = name + ' [' + date + ']'
 
             desc_box_text = torrent_tag.find('div', {'class': 'inner-box--desc'}).text
             size, unit = re.search(r'\d+.\d+ \w\w(?=\.)', desc_box_text)[0].split()
@@ -250,32 +236,28 @@ class lostfilm:
             return self.episode_url_pattern.format(href=href, season=season, episode=episode)
 
     def get_torrent_info(self, tdict):
-        try:
-            req = request.Request(tdict['link'])
+        req = request.Request(tdict['link'])
 
-            torrent = bdecode(request.urlopen(req).read())
-            info_hash = hashlib.sha1(bencode(torrent[b'info'])).digest()
+        torrent = bdecode(request.urlopen(req).read())
+        info_hash = hashlib.sha1(bencode(torrent[b'info'])).digest()
 
-            params = {
-                'peer_id': self.peer_id,
-                'info_hash': info_hash,
-                'port': 6881,
-                'left': 200075,
-                'downloaded': 0,
-                'uploaded': 0,
-                'compact': 1
-            }
+        params = {
+            'peer_id': self.peer_id,
+            'info_hash': info_hash,
+            'port': 6881,
+            'left': 200075,
+            'downloaded': 0,
+            'uploaded': 0,
+            'compact': 1
+        }
 
-            opener = request.build_opener()
-            response = opener.open(torrent[b'announce'].decode('utf-8') + '?' + parse.urlencode(params))
+        opener = request.build_opener()
+        response = opener.open(torrent[b'announce'].decode('utf-8') + '?' + parse.urlencode(params))
 
-            data = bdecode(response.read())
+        data = bdecode(response.read())
 
-            tdict['seeds'] = data.get(b'complete', -1)
-            tdict['leech'] = data.get(b'incomplete', 0) - 1
-        except Exception as exp:
-            if __name__ == '__main__':
-                self.pretty_log(exp)
+        tdict['seeds'] = data.get(b'complete', -1)
+        tdict['leech'] = data.get(b'incomplete', 0) - 1
 
         return tdict
 
@@ -287,7 +269,11 @@ class Session:
 
     token = None
     time = None
-    error = None
+    _error = 'Unknown'
+
+    @property
+    def error(self):
+        return 'Error: {info}.'.format(info=self._error)
 
     @property
     def file_path(self):
@@ -301,8 +287,7 @@ class Session:
             delta = datetime.now() - self.time
             return delta.days < 1
 
-        else:
-            return False
+        return False
 
     @property
     def cookies(self):
@@ -312,27 +297,24 @@ class Session:
         return {'lf_session': self.token}
 
     def __init__(self):
-        self.load_data()
-
-    def load_data(self):
-        if not os.path.exists(self.file_path):
+        if os.path.exists(self.file_path):
+            self.load_data()
+            
+        if not self.is_actual:
             self.create_new()
             self.save_data()
 
-        else:
-            with open(self.file_path, 'r') as file:
-                result = json.load(file)
+    def load_data(self):
+        with open(self.file_path, 'r') as file:
+            result = json.load(file)
 
-            if result.get('token') and result.get('time'):
-                self.token = result['token']
-                self.time = self.datetime_from_string(result['time'])
-
-            if not self.is_actual:
-                self.create_new()
+        if result.get('token') and result.get('time'):
+            self.token = result['token']
+            self.time = self.datetime_from_string(result['time'])
 
     def create_new(self):
         if not EMAIL or not PASSWORD :
-            self.error = 'Fill login data. {path}'.format(path=self.storage)
+            self._error = 'Fill login data'
 
             return False
 
@@ -350,29 +332,26 @@ class Session:
         
         cj = CookieJar()
         opener = request.build_opener(request.HTTPCookieProcessor(cj))
-        params = parse.urlencode(login_data)
-        response = opener.open(url, params.encode('utf-8'))
-        
-        result = json.loads(response.read().decode('utf-8'))
+        params = parse.urlencode(login_data).encode('utf-8')
+
+        result = json.loads(opener.open(url, params).read().decode('utf-8'))
         
         if 'error' in result:
-            self.error = result['error']
+            self._error = 'Incorrect login data'
 
         elif 'need_captcha' in result:
-            self.error = 'Captcha requested. Check description by right click.'
+            self._error = 'Captcha requested'
 
         else:
             for cookie in cj:
                 if cookie.name == 'lf_session':
-                    self.token = cookie.value
                     self.time = datetime.now()
-
-                    self.save_data()
-
+                    self.token = cookie.value
+                    
                     return True
 
             else:
-                self.error = 'Token problem'
+                self._error = 'Token problem'
         
         return False
 

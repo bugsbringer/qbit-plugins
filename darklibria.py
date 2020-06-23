@@ -1,4 +1,4 @@
-#VERSION: 0.10
+#VERSION: 0.11
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 import concurrent.futures
@@ -8,9 +8,6 @@ from urllib import parse
 
 from helpers import retrieve_url
 from novaprinter import prettyPrinter
-
-
-DEBUG = False
 
 
 class darklibria:
@@ -24,22 +21,18 @@ class darklibria:
     page_search_url_pattern = 'https://dark-libria.it/search?page={page}&find={what}'
 
     def search(self, what, cat='all'):
-        if DEBUG:
-            what = parse.quote(what)
+        what = parse.quote(parse.unquote(what))
 
-        html_code = retrieve_url(self.search_url_pattern.format(what=what))
-
-        pages_div = Parser(html_code).find('div', {'class': 'bg-dark d-sm-block d-none'})
-
-        pages_count = re.search(r'(?<=page=)\d+', pages_div.find_all('li')[-1].a['href'])[0]
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for page in range(1, int(pages_count) + 1):
+            for page in range(2, self.handle_page(what, 1) + 1):
                 executor.submit(self.handle_page, what, page)
 
     def handle_page(self, what, page):
         html_code = retrieve_url(self.page_search_url_pattern.format(page=page, what=what))
 
-        torrents_table = Parser(html_code).find('div', {'id': 'torrents_table'}).tbody
+        parser = Parser(html_code)
+
+        torrents_table = parser.find('div', {'id': 'torrents_table'}).tbody
 
         for torrent in torrents_table.find_all('tr', {'class': 'torrent'}):
             name = torrent.a.span.text
@@ -78,9 +71,9 @@ class darklibria:
             data = zip(qualities, episodes, links, sizes, seeders, leechers)
 
             for qual, ep, link, size, seeds, leechs in data:
-                
                 size, unit = size.split()
-                torrent_dict = {
+
+                prettyPrinter({
                     'link': self.url + link,
                     'name': ' '.join((name, qual, ep)),
                     'size': size + ' ' + self.units_dict[unit],
@@ -88,10 +81,12 @@ class darklibria:
                     'leech': int(leechs),
                     'engine_url': self.url,
                     'desc_link': self.url + desc_link
-                }
-
-                prettyPrinter(torrent_dict)
-
+                })
+        
+        if page == 1:
+            pages_div = parser.find('div', {'class': 'bg-dark d-sm-block d-none'})
+            pages_count = re.search(r'(?<=page=)\d+', pages_div.find_all('li')[-1].a['href'])[0]
+            return int(pages_count)
 
 
 class Tag:
@@ -189,5 +184,6 @@ class Parser(HTMLParser):
 
 
 if __name__ == '__main__':
-    DEBUG = True
-    darklibria().search('мастера меча')
+    import sys
+    
+    darklibria().search(' '.join(sys.argv[1:]))

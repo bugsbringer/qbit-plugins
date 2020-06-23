@@ -53,5 +53,5 @@ Errors
 ### Fill login data
 * Most likely you did not fill in the authorization data.
 
-### {error_code}
+### Incorrect login data
 * Most likely you incorrectly filled in the authorization data

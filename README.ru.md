@@ -51,5 +51,5 @@
 ### Fill login data
 * Похоже что поля **EMAIL** и **PASSWORD** не заполнены
 
-### {error_code}
+### Incorrect login data
 * Похоже что поля **EMAIL** и **PASSWORD** заполнены не верно
