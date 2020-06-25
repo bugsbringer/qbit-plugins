@@ -17,7 +17,6 @@ class darklibria:
 
     units_dict = {"Тб": "TB", "Гб": "GB", "Мб": "MB", "Кб": "KB"}
 
-    search_url_pattern = 'https://dark-libria.it/search?find={what}'
     page_search_url_pattern = 'https://dark-libria.it/search?page={page}&find={what}'
 
     def search(self, what, cat='all'):

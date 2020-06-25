@@ -1,4 +1,4 @@
-#VERSION: 0.16
+#VERSION: 0.17
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 
@@ -43,6 +43,7 @@ class lostfilm:
     peer_id = '-PC0001-' + ''.join([str(randint(0, 9)) for _ in range(12)])
 
     datetime_format = '%d.%m.%Y'
+    units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB"}
 
     def __init__(self):
         self.session = Session()
@@ -84,7 +85,7 @@ class lostfilm:
         else:
             search_result = retrieve_url(self.search_url_pattern.format(what=request.quote(what)))
             serials_tags = Parser(search_result).find_all('div', {'class': 'row-search'})
-
+            
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 for serial_href in (serial.a['href'] for serial in serials_tags):
                     executor.submit(self.get_episodes, serial_href)
@@ -180,17 +181,26 @@ class lostfilm:
 
         if not torrent_page_url:
             return
-
+        
         torrent_page = retrieve_url(torrent_page_url[0])
+
         desc_link = self.get_description_url(href, code)
 
-        units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB"}
-
         torrent_dicts = []
-        for torrent_tag in Parser(torrent_page).find_all('div', {'class': 'inner-box--item'}):
-            main = torrent_tag.find('div', {'class': 'inner-box--link main'}).a
-            link, name = main['href'], main.text.replace('\n', ' ')
-            
+        
+        block_3 = Parser(torrent_page).find('div', {'class': 'block_3'})
+        for result_div in block_3.find_all('div', {'class': 'result'}):
+
+            if result_div.find('div', {'class': 'result_label'}).img:
+                break
+
+            result_info = result_div.find('div', {'class': 'result_info'})
+
+            link = result_info.a['href']
+
+            a_text = result_info.a.text
+            name = a_text.replace('\n', ' ').replace('\t', '')
+
             if not new_episodes:
                 
                 if link in self.prevs[href]:
@@ -202,14 +212,15 @@ class lostfilm:
                 date = self.dates.pop(code, None)
                 if date:
                     name = name + ' [' + date + ']'
+            
+            desc_box_text = result_info.text.replace(a_text, '').replace('\t', '')
 
-            desc_box_text = torrent_tag.find('div', {'class': 'inner-box--desc'}).text
-            size, unit = re.search(r'\d+.\d+ \w\w(?=\.)', desc_box_text)[0].split()
-
+            size, unit = re.search(r'(?<=Размер: )\d+.\d+ \w\w', desc_box_text)[0].split()
+            
             torrent_dicts.append({
                 'link': link,
                 'name': name,
-                'size': ' '.join((size, units_dict.get(unit, ''))),
+                'size': ' '.join((size, self.units_dict.get(unit, ''))),
                 'seeds': -1,
                 'leech': -1,
                 'engine_url': self.url,
