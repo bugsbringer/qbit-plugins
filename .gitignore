@@ -1,7 +1,9 @@
 *.json
+*.log
 __pycache__
 .vscode
 helpers.py
 novaprinter.py
 socks.py
-installers
+install
+lf_new_design.py

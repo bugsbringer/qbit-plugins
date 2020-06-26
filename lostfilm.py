@@ -1,4 +1,4 @@
-#VERSION: 0.17
+#VERSION: 0.18
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 
@@ -11,6 +11,7 @@ ENABLE_PEERS_INFO = True
 import concurrent.futures
 import hashlib
 import json
+import logging
 import os
 import re
 from collections import OrderedDict
@@ -23,6 +24,19 @@ from urllib import parse, request
 
 from helpers import retrieve_url
 from novaprinter import prettyPrinter
+
+STORAGE = os.path.abspath(os.path.dirname(__file__))
+
+LOG_FORMAT = '[%(asctime)s] %(levelname)s:%(name)s:%(funcName)s - %(message)s'
+LOG_DT_FORMAT = '%d-%b-%y %H:%M:%S'
+
+if __name__ == '__main__':
+    logging.basicConfig(level='DEBUG', format=LOG_FORMAT, datefmt=LOG_DT_FORMAT)
+else:
+    logging.basicConfig(level='ERROR', filename=os.path.join(STORAGE, 'lostfilm.log'), format=LOG_FORMAT, datefmt=LOG_DT_FORMAT)
+
+logger = logging.getLogger('lostfilm')
+logger.setLevel(logging.WARNING)
 
 
 class lostfilm:
@@ -44,26 +58,27 @@ class lostfilm:
 
     datetime_format = '%d.%m.%Y'
     units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB"}
+    torrents_count = 0
 
     def __init__(self):
         self.session = Session()
-
-    def pretty_log(self, data):
-        prettyPrinter({
-            'link': ' ',
-            'name': str(data),
-            'size': "0",
-            'seeds': -1,
-            'leech': -1,
-            'engine_url': self.url,
-            'desc_link': 'https://www.lostfilm.tv'
-        })
-
+        
     def search(self, what, cat='all'):
-        if not self.session.is_actual:
-            self.pretty_log(self.session.error)
+        self.torrents_count = 0
+        logger.info(what)
 
-            return
+        if not self.session.is_actual: 
+            pretty_printer({
+                'link': 'Error',
+                'name': self.session.error,
+                'size': "0",
+                'seeds': -1,
+                'leech': -1,
+                'engine_url': self.url,
+                'desc_link': 'https://www.lostfilm.tv'
+            })
+
+            return False
 
         self.prevs = {}
         self.old_seasons = {}
@@ -83,12 +98,22 @@ class lostfilm:
                         self.get_new(fav=True)
 
         else:
-            search_result = retrieve_url(self.search_url_pattern.format(what=request.quote(what)))
-            serials_tags = Parser(search_result).find_all('div', {'class': 'row-search'})
-            
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                for serial_href in (serial.a['href'] for serial in serials_tags):
-                    executor.submit(self.get_episodes, serial_href)
+            try:
+                req = request.Request(self.search_url_pattern.format(what=request.quote(what)))
+                search_result = request.urlopen(req).read().decode('utf-8')
+            except Exception as exp:
+                logger.error(exp)
+
+            else:
+                serials_tags = Parser(search_result).find_all('div', {'class': 'row-search'})
+                if serials_tags:
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        for serial_href in (serial.a['href'] for serial in serials_tags):
+                            logger.debug(serial_href)
+
+                            executor.submit(self.get_episodes, serial_href)
+        
+        logger.info('%s torrents', self.torrents_count)
 
     def get_new(self, fav=False, days=7):
         type = 99 if fav else 0
@@ -157,6 +182,7 @@ class lostfilm:
 
                 if item_button:
                     episode_code = re.search(r'\d{7,9}', item_button)[0].rjust(9, '0')
+                    logger.debug('episode_code = %s', episode_code)
                     executor.submit(self.get_torrents, serial_href, episode_code)
 
     def get_torrents(self, href, code, new_episodes=False):
@@ -186,53 +212,45 @@ class lostfilm:
 
         desc_link = self.get_description_url(href, code)
 
-        torrent_dicts = []
-        
-        block_3 = Parser(torrent_page).find('div', {'class': 'block_3'})
-        for result_div in block_3.find_all('div', {'class': 'result'}):
+        logger.debug('desc_link = %s', desc_link)
 
-            if result_div.find('div', {'class': 'result_label'}).img:
-                break
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            for torrent_tag in Parser(torrent_page).find_all('div', {'class': 'inner-box--item'}):
+                main = torrent_tag.find('div', {'class': 'inner-box--link main'}).a
+                link, name = main['href'], main.text.replace('\n', ' ')
+                desc_box_text = torrent_tag.find('div', {'class': 'inner-box--desc'}).text
+                size, unit = re.search(r'\d+.\d+ \w\w(?=\.)', desc_box_text)[0].split()
 
-            result_info = result_div.find('div', {'class': 'result_info'})
-
-            link = result_info.a['href']
-
-            a_text = result_info.a.text
-            name = a_text.replace('\n', ' ').replace('\t', '')
-
-            if not new_episodes:
+                if not new_episodes:
+                    
+                    if link in self.prevs[href]:
+                        self.old_seasons[href] = max(self.old_seasons[href], season)
+                        break
+                    
+                    self.prevs[href].append(link)
+                else:
+                    date = self.dates.pop(code, None)
+                    if date:
+                        name = name + ' [' + date + ']'
                 
-                if link in self.prevs[href]:
-                    self.old_seasons[href] = max(self.old_seasons[href], season)
-                    break
+                torrent_dict = {
+                    'link': link,
+                    'name': name,
+                    'size': ' '.join((size, self.units_dict.get(unit, ''))),
+                    'seeds': -1,
+                    'leech': -1,
+                    'engine_url': self.url,
+                    'desc_link': desc_link
+                }
+
+                if ENABLE_PEERS_INFO:
+                    future = executor.submit(self.get_torrent_info, torrent_dict)
+                    future.add_done_callback(lambda f: pretty_printer(f.result()))
+
+                else:
+                    pretty_printer(torrent_dict)
                 
-                self.prevs[href].append(link)
-            else:
-                date = self.dates.pop(code, None)
-                if date:
-                    name = name + ' [' + date + ']'
-            
-            desc_box_text = result_info.text.replace(a_text, '').replace('\t', '')
-
-            size, unit = re.search(r'(?<=Размер: )\d+.\d+ \w\w', desc_box_text)[0].split()
-            
-            torrent_dicts.append({
-                'link': link,
-                'name': name,
-                'size': ' '.join((size, self.units_dict.get(unit, ''))),
-                'seeds': -1,
-                'leech': -1,
-                'engine_url': self.url,
-                'desc_link': desc_link
-            })
-
-        if ENABLE_PEERS_INFO:
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                [prettyPrinter(tdict) for tdict in executor.map(self.get_torrent_info, torrent_dicts)]
-
-        else:
-            [prettyPrinter(tdict) for tdict in torrent_dicts]
+                self.torrents_count += 1
 
     def get_description_url(self, href, code):
         season, episode = int(code[3:6]), int(code[6:])
@@ -247,10 +265,15 @@ class lostfilm:
             return self.episode_url_pattern.format(href=href, season=season, episode=episode)
 
     def get_torrent_info(self, tdict):
-        req = request.Request(tdict['link'])
+        try:
+            req = request.urlopen(request.Request(tdict['link']))
+        except Exception as e:
+            logger.error('torrent download: %s', e)
 
-        torrent = bdecode(request.urlopen(req).read())
+        torrent = bdecode(req.read())
         info_hash = hashlib.sha1(bencode(torrent[b'info'])).digest()
+
+        logger.debug('infohash = %s', info_hash)
 
         params = {
             'peer_id': self.peer_id,
@@ -262,8 +285,10 @@ class lostfilm:
             'compact': 1
         }
 
-        opener = request.build_opener()
-        response = opener.open(torrent[b'announce'].decode('utf-8') + '?' + parse.urlencode(params))
+        try:  
+            response = request.urlopen(torrent[b'announce'].decode('utf-8') + '?' + parse.urlencode(params))
+        except Exception as e:
+            logger.error('peers info request: %s', e)
 
         data = bdecode(response.read())
 
@@ -274,13 +299,12 @@ class lostfilm:
 
 
 class Session:
-    storage = os.path.abspath(os.path.dirname(__file__))
     file_name = 'lostfilm.json'
     datetime_format = '%m-%d-%y %H:%M:%S'
 
     token = None
     time = None
-    _error = 'Unknown'
+    _error = None
 
     @property
     def error(self):
@@ -288,13 +312,13 @@ class Session:
 
     @property
     def file_path(self):
-        return os.path.join(self.storage, self.file_name)
+        return os.path.join(STORAGE, self.file_name)
 
     @property
     def is_actual(self):
         """Needs to change session's token every 24 hours ot avoid captcha"""
 
-        if self.token and self.time:
+        if self.token and self.time and not self._error:
             delta = datetime.now() - self.time
             return delta.days < 1
 
@@ -323,10 +347,14 @@ class Session:
             self.token = result['token']
             self.time = self.datetime_from_string(result['time'])
 
+            logger.info('%s %s', self.token, self.time)
+
     def create_new(self):
+        self._error = None
+
         if not EMAIL or not PASSWORD :
             self._error = 'Fill login data'
-
+            logger.error(self._error)
             return False
 
         login_data = {
@@ -359,11 +387,15 @@ class Session:
                     self.time = datetime.now()
                     self.token = cookie.value
                     
+                    logger.info('%s %s', self.token, self.time)
+
                     return True
 
             else:
                 self._error = 'Token problem'
-        
+
+        logger.error(self._error)
+
         return False
 
     def save_data(self):
@@ -371,6 +403,8 @@ class Session:
             "token": self.token,
             "time": None if not self.time else self.datetime_to_string(self.time)
         }
+
+        logger.info(data)
 
         with open(self.file_path, 'w') as file:
             json.dump(data, file)
@@ -392,9 +426,9 @@ class Session:
 
 class Tag:
     def __init__(self, tag_type, *attrs):
-        self.text = ''
         self.type = tag_type
         self.attrs = {attr: value for attr, value in attrs}
+        self.text = ''
         self.tags = {}
 
     def _add_subtag(self, subtag):
@@ -461,6 +495,7 @@ class Parser(HTMLParser):
 
     def handle_startendtag(self, tag, attrs):
         new = Tag(tag, *attrs)
+
         for tag in self._current_path:
             tag._add_subtag(new)
 
@@ -487,10 +522,12 @@ class Parser(HTMLParser):
 class InvalidBencode(Exception):
     @classmethod
     def at_position(cls, error, position):
+        logger.error("%s at position %i" % (error, position))
         return cls("%s at position %i" % (error, position))
 
     @classmethod
     def eof(cls):
+        logger.error("EOF reached while parsing")
         return cls("EOF reached while parsing")
 
 
@@ -568,7 +605,32 @@ def decode_from_io(f):
     raise InvalidBencode.at_position('Unknown type : %s' % char, f.tell())
 
 
+def pretty_printer(dictionary):
+    if __name__ == '__main__':
+        data = json.dumps(dictionary, sort_keys=True, indent=4)
+        if dictionary['link'] == 'Error':
+            logger.error(data)
+
+        else:
+            logger.debug(data)
+        
+    else:
+        prettyPrinter(dictionary)
+
+
 if __name__ == '__main__':
     import sys
+    
+    if 1 < len(sys.argv) < 4:
 
-    lostfilm().search(' '.join(sys.argv[1:]))
+        if len(sys.argv) == 3:
+            if sys.argv[1] == '-d':
+                logger.setLevel(logging.DEBUG)
+            
+            else:
+                print('%s [-d] "search_query"' % (__file__))
+                exit()
+        else:
+            logger.setLevel(logging.INFO)
+        
+        lostfilm().search(sys.argv[-1])
