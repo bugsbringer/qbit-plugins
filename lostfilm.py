@@ -269,6 +269,7 @@ class lostfilm:
             req = request.urlopen(request.Request(tdict['link']))
         except Exception as e:
             logger.error('torrent download: %s', e)
+            return tdict
 
         torrent = bdecode(req.read())
         info_hash = hashlib.sha1(bencode(torrent[b'info'])).digest()
@@ -289,6 +290,7 @@ class lostfilm:
             response = request.urlopen(torrent[b'announce'].decode('utf-8') + '?' + parse.urlencode(params))
         except Exception as e:
             logger.error('peers info request: %s', e)
+            return tdict
 
         data = bdecode(response.read())
 
