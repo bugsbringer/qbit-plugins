@@ -2,6 +2,9 @@
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 import concurrent.futures
+from json import dumps
+import logging
+import os
 import re
 from html.parser import HTMLParser
 from urllib import parse
@@ -9,31 +12,52 @@ from urllib import parse
 from helpers import retrieve_url
 from novaprinter import prettyPrinter
 
+STORAGE = os.path.abspath(os.path.dirname(__file__))
+
+LOG_FORMAT = '[%(asctime)s] %(levelname)s:%(name)s:%(funcName)s - %(message)s'
+LOG_DT_FORMAT = '%d-%b-%y %H:%M:%S'
+
+if __name__ == '__main__':
+    logging.basicConfig(level='DEBUG', format=LOG_FORMAT, datefmt=LOG_DT_FORMAT)
+else:
+    logging.basicConfig(level='ERROR', filename=os.path.join(STORAGE, 'darklibria.log'), format=LOG_FORMAT, datefmt=LOG_DT_FORMAT)
+
+logger = logging.getLogger('darklibria')
+logger.setLevel(logging.WARNING)
+
 
 class darklibria:
     url = 'https://dark-libria.it/'
     name = 'dark-libria'
     supported_categories = {'all': '0'}
-
-    units_dict = {"Тб": "TB", "Гб": "GB", "Мб": "MB", "Кб": "KB"}
-
+    
+    units_dict = {"Тб": "TB", "Гб": "GB", "Мб": "MB", "Кб": "KB", "б": "B"}
     page_search_url_pattern = 'https://dark-libria.it/search?page={page}&find={what}'
 
     def search(self, what, cat='all'):
+        logger.info(what)
+
+        self.torrents_count = 0
         what = parse.quote(parse.unquote(what))
 
+        pages_count = self.handle_page(what, 1)
+        logger.info('%s pages', pages_count)
+
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for page in range(2, self.handle_page(what, 1) + 1):
+            for page in range(2, pages_count + 1):
                 executor.submit(self.handle_page, what, page)
 
-    def handle_page(self, what, page):
-        html_code = retrieve_url(self.page_search_url_pattern.format(page=page, what=what))
+        logger.info('%s torrents', self.torrents_count)
 
-        parser = Parser(html_code)
+    def handle_page(self, what, page):
+        parser = Parser(retrieve_url(self.page_search_url_pattern.format(page=page, what=what)))
 
         torrents_table = parser.find('div', {'id': 'torrents_table'}).tbody
+        torrents = torrents_table.find_all('tr', {'class': 'torrent'})
 
-        for torrent in torrents_table.find_all('tr', {'class': 'torrent'}):
+        logger.info('[page %s] %s animes', page, len(torrents))
+
+        for torrent in torrents:
             name = torrent.a.span.text
             desc_link = torrent.a['href']
             
@@ -72,7 +96,7 @@ class darklibria:
             for qual, ep, link, size, seeds, leechs in data:
                 size, unit = size.split()
 
-                prettyPrinter({
+                self.pretty_printer({
                     'link': self.url + link,
                     'name': ' '.join((name, qual, ep)),
                     'size': size + ' ' + self.units_dict[unit],
@@ -81,12 +105,24 @@ class darklibria:
                     'engine_url': self.url,
                     'desc_link': self.url + desc_link
                 })
-        
+            
         if page == 1:
             pages_div = parser.find('div', {'class': 'bg-dark d-sm-block d-none'})
             pages_count = re.search(r'(?<=page=)\d+', pages_div.find_all('li')[-1].a['href'])[0]
             return int(pages_count)
 
+    def pretty_printer(self, dictionary):
+        if __name__ == '__main__':
+            data = dumps(dictionary, sort_keys=True, indent=4)
+            if dictionary['link'] == 'Error':
+                logger.error(data)
+            else:
+                logger.debug(data)
+            
+        else:
+            prettyPrinter(dictionary)
+        
+        self.torrents_count += 1
 
 class Tag:
     def __init__(self, tag_type=None, attrs=None, is_self_closing=None, root=False, parent=None, is_decl=False):
@@ -258,4 +294,16 @@ class Parser(HTMLParser):
 if __name__ == '__main__':
     import sys
     
-    darklibria().search(' '.join(sys.argv[1:]))
+    if 1 < len(sys.argv) < 4:
+
+        if len(sys.argv) == 3:
+            if sys.argv[1] == '-d':
+                logger.setLevel(logging.DEBUG)
+            
+            else:
+                print('%s [-d] "search_query"' % (__file__))
+                exit()
+        else:
+            logger.setLevel(logging.INFO)
+        
+        darklibria().search(sys.argv[-1])
