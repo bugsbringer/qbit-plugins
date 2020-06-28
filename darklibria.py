@@ -89,97 +89,170 @@ class darklibria:
 
 
 class Tag:
-    def __init__(self, tag_type, *attrs):
-        self.text = ''
+    def __init__(self, tag_type=None, attrs=None, is_self_closing=None, root=False, parent=None, is_decl=False):
+        self.children = tuple()
+
         self.type = tag_type
-        self.attrs = {attr: value for attr, value in attrs} if attrs else dict()
-        self.tags = dict()
+        self._attrs = attrs
+        self.parent = parent
 
-    def _add_subtag(self, subtag):
-        self.tags[subtag.type] = self.tags.get(subtag.type, []) + [subtag]
-
-    def find(self, tag_type, attrs=None):
-        result = self.find_all(tag_type, attrs)
+        self.is_self_closing = is_self_closing
+        self.root = root
+        self.is_decl = is_decl
         
+    @property
+    def attrs(self):
+        return {} if not self._attrs else dict(self._attrs)
+
+    @property
+    def text(self):
+        """returns str"""
+        return ''.join(c if isinstance(c, str) else c.text for c in self.children)
+
+    def _add_child(self, child):
+        if isinstance(child, Tag):
+            self._add_childtag(child)
+        elif isinstance(child, str):
+            self._add_text(child)
+        else:
+            TypeError('Argument must be str or %s, not %s' % (type(self), type(child)))
+
+    def _add_childtag(self, child):
+        if isinstance(child, Tag):
+            self.children += (child, )
+            child.parent = self
+        else:
+            TypeError('Argument must be %s, not %s' % (type(self), type(child)))
+
+    def _add_text(self, text):
+        if isinstance(text, str):
+            self.children += (text, )
+        else:
+            TypeError('Argument must be str, not %s' % (type(text)))
+        
+    def _subtags(self):
+        """returns list"""
+        return list(filter(lambda obj: isinstance(obj, Tag), self.children))
+
+    def _all_subtags(self):
+        """returns list"""
+        tags = []
+        for child_tag in self._subtags():
+            tags.append(child_tag)
+            tags.extend(child_tag._all_subtags())
+        
+        return tags
+
+    def find(self, tag_type=None, attrs=None):
+        """returns Tag or None"""
+        result = self.find_all(tag_type, attrs)
         return None if not result else result[0]
 
-    def find_all(self, tag_type, attrs=None):
-        result = self.tags.get(tag_type)
+    def find_all(self, tag_type=None, attrs=None):
+        """returns list"""
+        if tag_type is None:
+            results = self._all_subtags()
+        else:
+            results = list(filter(lambda t: t.type == tag_type, self._all_subtags()))
 
-        if attrs and result:
-            def func(tag):
-                if not set(attrs.keys()) <= set(tag.attrs.keys()):
+        if not attrs:
+            return results
+
+        def func(tag):
+            if not tag.attrs or not set(attrs.keys()) <= set(tag.attrs.keys()):
+                return False
+
+            for attr in attrs.keys():
+                if not set(attrs[attr].split()) <= set(tag.attrs[attr].split()):
                     return False
+            
+            return True
 
-                for attr in attrs.keys():
-                    if not set(attrs[attr].split()) <= set(tag.attrs[attr].split()):
-                        return False
-                
-                return True
-
-            result = list(filter(func, result))
-
-        return result
+        return list(filter(func, results))
 
     def __getitem__(self, key):
         return self.attrs[key]
 
-    def __getattr__(self, tag):
-        return self.find(tag)
+    def __getattr__(self, attr):
+        return self.find(tag_type=attr)
 
+    def __repr__(self):
+        attrs = ' '.join(
+            (str(attr) if value is None else '{}="{}"'.format(attr, value))
+            for attr, value in self.attrs.items()
+        )
 
+        starttag = ' '.join((self.type, attrs)) if attrs else self.type
+
+        if self.is_self_closing:
+            return '<{starttag}/>'.format(starttag=starttag)
+        elif self.is_decl:
+            return '<!{decl}>'.format(decl=self.type)
+        else:
+            nested = ''.join(map(str, self.children))
+            return '<{starttag}>{nested}</{tag}>'.format(starttag=starttag, nested=nested, tag=self.type)
+
+            
 class Parser(HTMLParser):
+    def __init__(self, html_code, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-    @property
-    def text(self):
-        return self._root.text
+        self._root = Tag('_root')
+        self._path = [self._root]
+
+        self.feed(html_code)
+        for obj in self._path[1:]:
+            self._root._add_child(obj)
+
+        del self._path
+
+        self.find = self._root.find
+        self.find_all = self._root.find_all
 
     @property
     def attrs(self):
         return self._root.attrs
 
-    def __init__(self, html_code, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    @property
+    def text(self):
+        return self._root.text
 
-        self._root = Tag('_root')
-        self._current_path = [self._root]
+    def handle_starttag(self, tag_type, attrs):
+        self._path.append(Tag(tag_type=tag_type, attrs=attrs))
 
-        self.feed(html_code)
+    def handle_endtag(self, tag_type):
+        for pos, tag in tuple(enumerate(self._path))[::-1]:
+            if isinstance(tag, Tag) and tag.type == tag_type and tag.is_self_closing == None:
+                tag.is_self_closing = False
 
-    def handle_starttag(self, tag, attrs):
-        new = Tag(tag, *attrs)
+                for obj in self._path[pos + 1:]:
+                    if isinstance(obj, Tag):
+                        if obj.is_self_closing is None:
+                            obj.is_self_closing = True
 
-        for tag in self._current_path:
-            tag._add_subtag(new)
+                    tag._add_child(obj)
 
-        self._current_path.append(new)
+                self._path = self._path[:pos + 1]
+                break
 
-    def handle_endtag(self, tag):
-        self._current_path.pop()
-
-    def handle_startendtag(self, tag, attrs):
-        new = Tag(tag, *attrs)
-        for tag in self._current_path:
-            tag._add_subtag(new)
+    def handle_startendtag(self, tag_type, attrs):
+        self._path.append(Tag(tag_type=tag_type, attrs=attrs, is_self_closing=True))
 
     def handle_decl(self, decl):
-        self._root._add_subtag(Tag('declaration'))
+        self.decl = Tag(tag_type=decl, is_decl=True)
+        self._path.append(self.decl)
 
-    def handle_data(self, data):
-        for tag in self._current_path:
-            tag.text += data
-
-    def find(self, tag_type, attrs=None):
-        return self._root.find(tag_type, attrs)
-
-    def find_all(self, tag_type, attrs=None):
-        return self._root.find_all(tag_type, attrs)
+    def handle_data(self, text):
+        self._path.append(text)
 
     def __getitem__(self, key):
         return self.attrs[key]
 
-    def __getattr__(self, tag):
-        return self.find(tag)
+    def __getattr__(self, attr):
+        return self.find(tag_type=attr)
+
+    def __repr__(self):
+        return ''.join(str(c) for c in self._root.children)
 
 
 if __name__ == '__main__':
