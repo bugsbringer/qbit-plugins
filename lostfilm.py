@@ -57,18 +57,17 @@ class lostfilm:
     peer_id = '-PC0001-' + ''.join([str(randint(0, 9)) for _ in range(12)])
 
     datetime_format = '%d.%m.%Y'
-    units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB"}
+    units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB", "б": "B"}
     torrents_count = 0
 
     def __init__(self):
         self.session = Session()
         
     def search(self, what, cat='all'):
-        self.torrents_count = 0
         logger.info(what)
 
         if not self.session.is_actual: 
-            pretty_printer({
+            self.pretty_printer({
                 'link': 'Error',
                 'name': self.session.error,
                 'size': "0",
@@ -82,7 +81,8 @@ class lostfilm:
 
         self.prevs = {}
         self.old_seasons = {}
-        
+        self.torrents_count = 0
+
         if parse.unquote(what).startswith('@'): 
             params = parse.unquote(what)[1:].split(':')
             
@@ -245,10 +245,9 @@ class lostfilm:
 
                 if ENABLE_PEERS_INFO:
                     future = executor.submit(self.get_torrent_info, torrent_dict)
-                    future.add_done_callback(lambda f: pretty_printer(f.result()))
-
+                    future.add_done_callback(lambda f: self.pretty_printer(f.result()))
                 else:
-                    pretty_printer(torrent_dict)
+                    self.pretty_printer(torrent_dict)
                 
                 self.torrents_count += 1
 
@@ -298,6 +297,19 @@ class lostfilm:
         tdict['leech'] = data.get(b'incomplete', 0) - 1
 
         return tdict
+    
+    def pretty_printer(self, dictionary):
+        if __name__ == '__main__':
+            data = json.dumps(dictionary, sort_keys=True, indent=4)
+            if dictionary['link'] == 'Error':
+                logger.error(data)
+            else:
+                logger.debug(data)
+            
+        else:
+            prettyPrinter(dictionary)
+        
+        self.torrents_count += 1
 
 
 class Session:
@@ -680,19 +692,6 @@ def decode_from_io(f):
         return string
 
     raise InvalidBencode.at_position('Unknown type : %s' % char, f.tell())
-
-
-def pretty_printer(dictionary):
-    if __name__ == '__main__':
-        data = json.dumps(dictionary, sort_keys=True, indent=4)
-        if dictionary['link'] == 'Error':
-            logger.error(data)
-
-        else:
-            logger.debug(data)
-        
-    else:
-        prettyPrinter(dictionary)
 
 
 if __name__ == '__main__':
