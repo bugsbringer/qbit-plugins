@@ -1,4 +1,4 @@
-#VERSION: 0.18
+#VERSION: 0.19
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 
@@ -57,14 +57,15 @@ class lostfilm:
     peer_id = '-PC0001-' + ''.join([str(randint(0, 9)) for _ in range(12)])
 
     datetime_format = '%d.%m.%Y'
-    units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB", "б": "B"}
-    torrents_count = 0
+    units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB", "Б": "B"}
 
     def __init__(self):
         self.session = Session()
         
     def search(self, what, cat='all'):
         logger.info(what)
+
+        self.torrents_count = 0
 
         if not self.session.is_actual: 
             self.pretty_printer({
@@ -74,14 +75,13 @@ class lostfilm:
                 'seeds': -1,
                 'leech': -1,
                 'engine_url': self.url,
-                'desc_link': 'https://www.lostfilm.tv'
+                'desc_link': self.url
             })
 
             return False
 
         self.prevs = {}
         self.old_seasons = {}
-        self.torrents_count = 0
 
         if parse.unquote(what).startswith('@'): 
             params = parse.unquote(what)[1:].split(':')
@@ -213,25 +213,22 @@ class lostfilm:
         desc_link = self.get_description_url(href, code)
 
         logger.debug('desc_link = %s', desc_link)
+        
+        date = ' [' + self.dates.pop(code, '') + ']' if new_episodes else ''
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             for torrent_tag in Parser(torrent_page).find_all('div', {'class': 'inner-box--item'}):
                 main = torrent_tag.find('div', {'class': 'inner-box--link main'}).a
-                link, name = main['href'], main.text.replace('\n', ' ')
+                link, name = main['href'], main.text.replace('\n', ' ') + date
                 desc_box_text = torrent_tag.find('div', {'class': 'inner-box--desc'}).text
                 size, unit = re.search(r'\d+.\d+ \w\w(?=\.)', desc_box_text)[0].split()
 
                 if not new_episodes:
-                    
                     if link in self.prevs[href]:
                         self.old_seasons[href] = max(self.old_seasons[href], season)
                         break
                     
                     self.prevs[href].append(link)
-                else:
-                    date = self.dates.pop(code, None)
-                    if date:
-                        name = name + ' [' + date + ']'
                 
                 torrent_dict = {
                     'link': link,
@@ -299,14 +296,13 @@ class lostfilm:
         return tdict
     
     def pretty_printer(self, dictionary):
-        if __name__ == '__main__':
-            data = json.dumps(dictionary, sort_keys=True, indent=4)
-            if dictionary['link'] == 'Error':
-                logger.error(data)
-            else:
-                logger.debug(data)
-            
+        data = json.dumps(dictionary, sort_keys=True, indent=4)
+        if dictionary['link'] == 'Error':
+            logger.error(data)
         else:
+            logger.debug(data)
+
+        if __name__ != '__main__':
             prettyPrinter(dictionary)
         
         self.torrents_count += 1
@@ -350,8 +346,8 @@ class Session:
             self.load_data()
             
         if not self.is_actual:
-            self.create_new()
-            self.save_data()
+            if self.create_new():
+                self.save_data()
 
     def load_data(self):
         with open(self.file_path, 'r') as file:
@@ -367,7 +363,7 @@ class Session:
         self._error = None
 
         if not EMAIL or not PASSWORD :
-            self._error = 'Fill login data'
+            self._error = 'Incorrect login data'
             logger.error(self._error)
             return False
 
@@ -380,14 +376,18 @@ class Session:
             "captcha": "",
             "rem": 1
         }
-
+        
         url = "https://www.lostfilm.tv/ajaxik.php?"
         
         cj = CookieJar()
         opener = request.build_opener(request.HTTPCookieProcessor(cj))
         params = parse.urlencode(login_data).encode('utf-8')
-
-        result = json.loads(opener.open(url, params).read().decode('utf-8'))
+        try:
+            result = json.loads(opener.open(url, params).read().decode('utf-8'))
+        except Exception as e:
+            self._error = 'Connection failed'
+            logger.error('%s %s', self._error, e)
+            return False
         
         if 'error' in result:
             self._error = 'Incorrect login data'
@@ -413,13 +413,10 @@ class Session:
         return False
 
     def save_data(self):
-        if self.is_actual:
-            data = {
-                "token": self.token,
-                "time": None if not self.time else self.datetime_to_string(self.time)
-            }
-        else:
-            data = {"token": None, "time": None}
+        data = {
+            "token": self.token,
+            "time": None if not self.time else self.datetime_to_string(self.time)
+        }
 
         logger.info(data)
 
@@ -442,108 +439,103 @@ class Session:
 
 
 class Tag:
-    def __init__(self, tag_type=None, attrs=None, is_self_closing=None, root=False, parent=None, is_decl=False):
-        self.children = tuple()
-
-        self.type = tag_type
-        self._attrs = attrs
-        self.parent = parent
-
+    def __init__(self, tag=None, attrs=(), is_self_closing=None):
+        self.type = tag
         self.is_self_closing = is_self_closing
-        self.root = root
-        self.is_decl = is_decl
+        self._attrs = tuple(attrs)
+        self._content = tuple()
         
     @property
     def attrs(self):
-        return {} if not self._attrs else dict(self._attrs)
+        """returns dict of Tag's attrs"""
+        return dict(self._attrs)
 
     @property
     def text(self):
-        """returns str"""
-        return ''.join(c if isinstance(c, str) else c.text for c in self.children)
+        """returns str of all contained text"""
+        return ''.join(c if isinstance(c, str) else c.text for c in self._content)
 
-    def _add_child(self, child):
-        if isinstance(child, Tag):
-            self._add_childtag(child)
-        elif isinstance(child, str):
-            self._add_text(child)
+    def _add_content(self, obj):
+        if isinstance(obj, (Tag, str)):
+            self._content += (obj,)
         else:
-            TypeError('Argument must be str or %s, not %s' % (type(self), type(child)))
+            raise TypeError('Argument must be str or %s, not %s' % (self.__class__, obj.__class__))
 
-    def _add_childtag(self, child):
-        if isinstance(child, Tag):
-            self.children += (child, )
-            child.parent = self
-        else:
-            TypeError('Argument must be %s, not %s' % (type(self), type(child)))
-
-    def _add_text(self, text):
-        if isinstance(text, str):
-            self.children += (text, )
-        else:
-            TypeError('Argument must be str, not %s' % (type(text)))
-        
-    def _subtags(self):
-        """returns list"""
-        return list(filter(lambda obj: isinstance(obj, Tag), self.children))
-
-    def _all_subtags(self):
-        """returns list"""
-        tags = []
-        for child_tag in self._subtags():
-            tags.append(child_tag)
-            tags.extend(child_tag._all_subtags())
-        
-        return tags
-
-    def find(self, tag_type=None, attrs=None):
+    def find(self, tag=None, attrs=None):
         """returns Tag or None"""
-        result = self.find_all(tag_type, attrs)
-        return None if not result else result[0]
 
-    def find_all(self, tag_type=None, attrs=None):
+        return next(self._find_all(tag, attrs), None)
+
+    def find_all(self, tag=None, attrs=None):
         """returns list"""
-        if tag_type is None:
-            results = self._all_subtags()
-        else:
-            results = list(filter(lambda t: t.type == tag_type, self._all_subtags()))
 
-        if not attrs:
-            return results
+        return list(self._find_all(tag, attrs))
+        
+    def _find_all(self, tag_type=None, attrs=None):
+        """returns generator"""
 
-        def func(tag):
-            if not tag.attrs or not set(attrs.keys()) <= set(tag.attrs.keys()):
-                return False
+        if not (isinstance(tag_type, (str, Tag)) or tag_type is None):
+            raise TypeError('tag_type argument must be str or Tag, not %s' % (tag_type.__class__))
 
-            for attr in attrs.keys():
-                if not set(attrs[attr].split()) <= set(tag.attrs[attr].split()):
-                    return False
+        if not (isinstance(attrs, dict) or attrs is None):
+            raise TypeError('attrs argument must be dict, not %s' % (self.__class__))
+
+        # get tags-descendants generator
+        results = self.descendants
+
+        # filter by Tag.type
+        if tag_type:
+            if isinstance(tag_type, Tag):
+                tag_type, attrs = tag_type.type, (attrs if attrs else tag_type.attrs)
+
+            results = filter(lambda t: t.type == tag_type, results)
+
+        # filter by Tag.attrs
+        if attrs:
+            # remove Tags without attrs
+            results = filter(lambda t: t._attrs, results)
+
+            def filter_func(tag):
+                for key in attrs.keys():
+                    if attrs[key] not in tag.attrs.get(key, ()):
+                        return False
+                return True
             
-            return True
+            # filter by attrs
+            results = filter(filter_func, results)
+        
+        yield from results
 
-        return list(filter(func, results))
+    @property
+    def children(self):
+        """returns generator of tags-children"""
+
+        return (obj for obj in self._content if isinstance(obj, Tag))
+
+    @property
+    def descendants(self):
+        """returns generator of tags-descendants"""
+
+        for child_tag in self.children:
+            yield child_tag
+            yield from child_tag.descendants
 
     def __getitem__(self, key):
         return self.attrs[key]
 
     def __getattr__(self, attr):
-        return self.find(tag_type=attr)
+        if not attr.startswith("__"):
+            return self.find(tag=attr)
 
     def __repr__(self):
-        attrs = ' '.join(
-            (str(attr) if value is None else '{}="{}"'.format(attr, value))
-            for attr, value in self.attrs.items()
-        )
-
+        attrs = ' '.join(str(k) if v is None else '{}="{}"'.format(k, v) for k, v in self._attrs)
         starttag = ' '.join((self.type, attrs)) if attrs else self.type
 
         if self.is_self_closing:
-            return '<{starttag}/>'.format(starttag=starttag)
-        elif self.is_decl:
-            return '<!{decl}>'.format(decl=self.type)
+            return '<{starttag}>\n'.format(starttag=starttag)
         else:
-            nested = ''.join(map(str, self.children))
-            return '<{starttag}>{nested}</{tag}>'.format(starttag=starttag, nested=nested, tag=self.type)
+            nested = '\n' * bool(next(self.children, None)) + ''.join(map(str, self._content))
+            return '<{}>{}</{}>\n'.format(starttag, nested, self.type)
 
             
 class Parser(HTMLParser):
@@ -552,12 +544,10 @@ class Parser(HTMLParser):
 
         self._root = Tag('_root')
         self._path = [self._root]
-
-        self.feed(html_code)
-        for obj in self._path[1:]:
-            self._root._add_child(obj)
-
-        del self._path
+        
+        self.feed(''.join(map(str.strip, html_code.splitlines())))
+        self.handle_endtag(self._root.type)
+        self.close()
 
         self.find = self._root.find
         self.find_all = self._root.find_all
@@ -570,30 +560,29 @@ class Parser(HTMLParser):
     def text(self):
         return self._root.text
 
-    def handle_starttag(self, tag_type, attrs):
-        self._path.append(Tag(tag_type=tag_type, attrs=attrs))
+    def handle_starttag(self, tag, attrs):
+        self._path.append(Tag(tag=tag, attrs=attrs))
 
     def handle_endtag(self, tag_type):
         for pos, tag in tuple(enumerate(self._path))[::-1]:
-            if isinstance(tag, Tag) and tag.type == tag_type and tag.is_self_closing == None:
+            if isinstance(tag, Tag) and tag.type == tag_type and tag.is_self_closing is None:
                 tag.is_self_closing = False
 
                 for obj in self._path[pos + 1:]:
-                    if isinstance(obj, Tag):
-                        if obj.is_self_closing is None:
-                            obj.is_self_closing = True
+                    if isinstance(obj, Tag) and obj.is_self_closing is None:
+                        obj.is_self_closing = True
 
-                    tag._add_child(obj)
+                    tag._add_content(obj)
 
                 self._path = self._path[:pos + 1]
+
                 break
 
-    def handle_startendtag(self, tag_type, attrs):
-        self._path.append(Tag(tag_type=tag_type, attrs=attrs, is_self_closing=True))
+    def handle_startendtag(self, tag, attrs):
+        self._path.append(Tag(tag=tag, attrs=attrs, is_self_closing=True))
 
     def handle_decl(self, decl):
-        self.decl = Tag(tag_type=decl, is_decl=True)
-        self._path.append(self.decl)
+        self._path.append(Tag(tag='!'+decl, is_self_closing=True))
 
     def handle_data(self, text):
         self._path.append(text)
@@ -602,22 +591,11 @@ class Parser(HTMLParser):
         return self.attrs[key]
 
     def __getattr__(self, attr):
-        return self.find(tag_type=attr)
+        if not attr.startswith("__"):
+            return getattr(self._root, attr)
 
     def __repr__(self):
-        return ''.join(str(c) for c in self._root.children)
-
-
-class InvalidBencode(Exception):
-    @classmethod
-    def at_position(cls, error, position):
-        logger.error("%s at position %i" % (error, position))
-        return cls("%s at position %i" % (error, position))
-
-    @classmethod
-    def eof(cls):
-        logger.error("EOF reached while parsing")
-        return cls("EOF reached while parsing")
+        return ''.join(str(c) for c in self._root._content)
 
 
 def bencode(value):
@@ -634,64 +612,74 @@ def bencode(value):
 
 
 def bdecode(data):
+    class InvalidBencode(Exception):
+        @classmethod
+        def at_position(cls, error, position):
+            logger.error("%s at position %i" % (error, position))
+            return cls("%s at position %i" % (error, position))
+
+        @classmethod
+        def eof(cls):
+            logger.error("EOF reached while parsing")
+            return cls("EOF reached while parsing")
+            
+    def decode_from_io(f):
+        char = f.read(1)
+        if char == b'd':
+            dict_ = OrderedDict()
+            while True:
+                position = f.tell()
+                char = f.read(1)
+                if char == b'e':
+                    return dict_
+                if char == b'':
+                    raise InvalidBencode.eof()
+
+                f.seek(position)
+                key = decode_from_io(f)
+                dict_[key] = decode_from_io(f)
+
+        if char == b'l':
+            list_ = []
+            while True:
+                position = f.tell()
+                char = f.read(1)
+                if char == b'e':
+                    return list_
+                if char == b'':
+                    raise InvalidBencode.eof()
+                f.seek(position)
+                list_.append(decode_from_io(f))
+
+        if char == b'i':
+            digits = b''
+            while True:
+                char = f.read(1)
+                if char == b'e':
+                    break
+                if char == b'':
+                    raise InvalidBencode.eof()
+                if not char.isdigit():
+                    raise InvalidBencode.at_position('Expected int, got %s' % str(char), f.tell())
+                digits += char
+            return int(digits)
+
+        if char.isdigit():
+            digits = char
+            while True:
+                char = f.read(1)
+                if char == b':':
+                    break
+                if char == b'':
+                    raise InvalidBencode
+                digits += char
+            length = int(digits)
+            string = f.read(length)
+            return string
+
+        raise InvalidBencode.at_position('Unknown type : %s' % char, f.tell())
+
     return decode_from_io(BytesIO(data))
-
-
-def decode_from_io(f):
-    char = f.read(1)
-    if char == b'd':
-        dict_ = OrderedDict()
-        while True:
-            position = f.tell()
-            char = f.read(1)
-            if char == b'e':
-                return dict_
-            if char == b'':
-                raise InvalidBencode.eof()
-
-            f.seek(position)
-            key = decode_from_io(f)
-            dict_[key] = decode_from_io(f)
-
-    if char == b'l':
-        list_ = []
-        while True:
-            position = f.tell()
-            char = f.read(1)
-            if char == b'e':
-                return list_
-            if char == b'':
-                raise InvalidBencode.eof()
-            f.seek(position)
-            list_.append(decode_from_io(f))
-
-    if char == b'i':
-        digits = b''
-        while True:
-            char = f.read(1)
-            if char == b'e':
-                break
-            if char == b'':
-                raise InvalidBencode.eof()
-            if not char.isdigit():
-                raise InvalidBencode.at_position('Expected int, got %s' % str(char), f.tell())
-            digits += char
-        return int(digits)
-
-    if char.isdigit():
-        digits = char
-        while True:
-            char = f.read(1)
-            if char == b':':
-                break
-            if char == b'':
-                raise InvalidBencode
-            digits += char
-        length = int(digits)
-        string = f.read(length)
-        return string
-
-    raise InvalidBencode.at_position('Unknown type : %s' % char, f.tell())
 
 
 if __name__ == '__main__':

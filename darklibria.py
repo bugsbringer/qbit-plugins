@@ -1,12 +1,12 @@
-#VERSION: 0.11
+#VERSION: 0.12
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 import concurrent.futures
-from json import dumps
 import logging
 import os
 import re
 from html.parser import HTMLParser
+from json import dumps
 from urllib import parse
 
 from helpers import retrieve_url
@@ -20,7 +20,7 @@ LOG_DT_FORMAT = '%d-%b-%y %H:%M:%S'
 if __name__ == '__main__':
     logging.basicConfig(level='DEBUG', format=LOG_FORMAT, datefmt=LOG_DT_FORMAT)
 else:
-    logging.basicConfig(level='ERROR', filename=os.path.join(STORAGE, 'darklibria.log'), format=LOG_FORMAT, datefmt=LOG_DT_FORMAT)
+    logging.basicConfig(level='WARNING', filename=os.path.join(STORAGE, 'darklibria.log'), format=LOG_FORMAT, datefmt=LOG_DT_FORMAT)
 
 logger = logging.getLogger('darklibria')
 logger.setLevel(logging.WARNING)
@@ -40,17 +40,34 @@ class darklibria:
         self.torrents_count = 0
         what = parse.quote(parse.unquote(what))
 
-        pages_count = self.handle_page(what, 1)
-        logger.info('%s pages', pages_count)
-
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for page in range(2, pages_count + 1):
+            for page in range(2, self.handle_page(what, 1) + 1):
                 executor.submit(self.handle_page, what, page)
 
         logger.info('%s torrents', self.torrents_count)
 
     def handle_page(self, what, page):
-        parser = Parser(retrieve_url(self.page_search_url_pattern.format(page=page, what=what)))
+        try:
+            parser = Parser(retrieve_url(self.page_search_url_pattern.format(page=page, what=what)))
+        except Exception as exp:
+            logger.error(exp)
+            self.pretty_printer({
+                'link': 'Error',
+                'name': 'Connection failed',
+                'size': "0",
+                'seeds': -1,
+                'leech': -1,
+                'engine_url': self.url,
+                'desc_link': self.url
+            })
+
+            return 0
+
+        if page == 1:
+            pages_div = parser.find('div', {'class': 'bg-dark d-sm-block d-none'})
+            pages_count = re.search(r'(?<=page=)\d+', pages_div.find_all('li')[-1].a['href'])[0]
+
+            logger.info('%s pages', pages_count)
 
         torrents_table = parser.find('div', {'id': 'torrents_table'}).tbody
         torrents = torrents_table.find_all('tr', {'class': 'torrent'})
@@ -107,126 +124,119 @@ class darklibria:
                 })
             
         if page == 1:
-            pages_div = parser.find('div', {'class': 'bg-dark d-sm-block d-none'})
-            pages_count = re.search(r'(?<=page=)\d+', pages_div.find_all('li')[-1].a['href'])[0]
             return int(pages_count)
 
     def pretty_printer(self, dictionary):
-        if __name__ == '__main__':
-            data = dumps(dictionary, sort_keys=True, indent=4)
-            if dictionary['link'] == 'Error':
-                logger.error(data)
-            else:
-                logger.debug(data)
-            
+        data = dumps(dictionary, sort_keys=True, indent=4)
+        if dictionary['link'] == 'Error':
+            logger.error(data)
         else:
+            logger.debug(data)
+
+        if __name__ != '__main__':
             prettyPrinter(dictionary)
         
         self.torrents_count += 1
 
+
 class Tag:
-    def __init__(self, tag_type=None, attrs=None, is_self_closing=None, root=False, parent=None, is_decl=False):
-        self.children = tuple()
-
-        self.type = tag_type
-        self._attrs = attrs
-        self.parent = parent
-
+    def __init__(self, tag=None, attrs=(), is_self_closing=None):
+        self.type = tag
         self.is_self_closing = is_self_closing
-        self.root = root
-        self.is_decl = is_decl
+        self._attrs = tuple(attrs)
+        self._content = tuple()
         
     @property
     def attrs(self):
-        return {} if not self._attrs else dict(self._attrs)
+        """returns dict of Tag's attrs"""
+        return dict(self._attrs)
 
     @property
     def text(self):
-        """returns str"""
-        return ''.join(c if isinstance(c, str) else c.text for c in self.children)
+        """returns str of all contained text"""
+        return ''.join(c if isinstance(c, str) else c.text for c in self._content)
 
-    def _add_child(self, child):
-        if isinstance(child, Tag):
-            self._add_childtag(child)
-        elif isinstance(child, str):
-            self._add_text(child)
+    def _add_content(self, obj):
+        if isinstance(obj, (Tag, str)):
+            self._content += (obj,)
         else:
-            TypeError('Argument must be str or %s, not %s' % (type(self), type(child)))
+            raise TypeError('Argument must be str or %s, not %s' % (self.__class__, obj.__class__))
 
-    def _add_childtag(self, child):
-        if isinstance(child, Tag):
-            self.children += (child, )
-            child.parent = self
-        else:
-            TypeError('Argument must be %s, not %s' % (type(self), type(child)))
-
-    def _add_text(self, text):
-        if isinstance(text, str):
-            self.children += (text, )
-        else:
-            TypeError('Argument must be str, not %s' % (type(text)))
-        
-    def _subtags(self):
-        """returns list"""
-        return list(filter(lambda obj: isinstance(obj, Tag), self.children))
-
-    def _all_subtags(self):
-        """returns list"""
-        tags = []
-        for child_tag in self._subtags():
-            tags.append(child_tag)
-            tags.extend(child_tag._all_subtags())
-        
-        return tags
-
-    def find(self, tag_type=None, attrs=None):
+    def find(self, tag=None, attrs=None):
         """returns Tag or None"""
-        result = self.find_all(tag_type, attrs)
-        return None if not result else result[0]
 
-    def find_all(self, tag_type=None, attrs=None):
+        return next(self._find_all(tag, attrs), None)
+
+    def find_all(self, tag=None, attrs=None):
         """returns list"""
-        if tag_type is None:
-            results = self._all_subtags()
-        else:
-            results = list(filter(lambda t: t.type == tag_type, self._all_subtags()))
 
-        if not attrs:
-            return results
+        return list(self._find_all(tag, attrs))
+        
+    def _find_all(self, tag_type=None, attrs=None):
+        """returns generator"""
 
-        def func(tag):
-            if not tag.attrs or not set(attrs.keys()) <= set(tag.attrs.keys()):
-                return False
+        if not (isinstance(tag_type, (str, Tag)) or tag_type is None):
+            raise TypeError('tag_type argument must be str or Tag, not %s' % (tag_type.__class__))
 
-            for attr in attrs.keys():
-                if not set(attrs[attr].split()) <= set(tag.attrs[attr].split()):
-                    return False
+        if not (isinstance(attrs, dict) or attrs is None):
+            raise TypeError('attrs argument must be dict, not %s' % (self.__class__))
+
+        # get tags-descendants generator
+        results = self.descendants
+
+        # filter by Tag.type
+        if tag_type:
+            if isinstance(tag_type, Tag):
+                tag_type, attrs = tag_type.type, (attrs if attrs else tag_type.attrs)
+
+            results = filter(lambda t: t.type == tag_type, results)
+
+        # filter by Tag.attrs
+        if attrs:
+            # remove Tags without attrs
+            results = filter(lambda t: t._attrs, results)
+
+            def filter_func(tag):
+                for key in attrs.keys():
+                    if attrs[key] not in tag.attrs.get(key, ()):
+                        return False
+                return True
             
-            return True
+            # filter by attrs
+            results = filter(filter_func, results)
+        
+        yield from results
 
-        return list(filter(func, results))
+    @property
+    def children(self):
+        """returns generator of tags-children"""
+
+        return (obj for obj in self._content if isinstance(obj, Tag))
+
+    @property
+    def descendants(self):
+        """returns generator of tags-descendants"""
+
+        for child_tag in self.children:
+            yield child_tag
+            yield from child_tag.descendants
 
     def __getitem__(self, key):
         return self.attrs[key]
 
     def __getattr__(self, attr):
-        return self.find(tag_type=attr)
+        if not attr.startswith("__"):
+            return self.find(tag=attr)
 
     def __repr__(self):
-        attrs = ' '.join(
-            (str(attr) if value is None else '{}="{}"'.format(attr, value))
-            for attr, value in self.attrs.items()
-        )
-
+        attrs = ' '.join(str(k) if v is None else '{}="{}"'.format(k, v) for k, v in self._attrs)
         starttag = ' '.join((self.type, attrs)) if attrs else self.type
 
         if self.is_self_closing:
-            return '<{starttag}/>'.format(starttag=starttag)
-        elif self.is_decl:
-            return '<!{decl}>'.format(decl=self.type)
+            return '<{starttag}>\n'.format(starttag=starttag)
         else:
-            nested = ''.join(map(str, self.children))
-            return '<{starttag}>{nested}</{tag}>'.format(starttag=starttag, nested=nested, tag=self.type)
+            nested = '\n' * bool(next(self.children, None)) + ''.join(map(str, self._content))
+            return '<{}>{}</{}>\n'.format(starttag, nested, self.type)
 
             
 class Parser(HTMLParser):
@@ -235,12 +245,10 @@ class Parser(HTMLParser):
 
         self._root = Tag('_root')
         self._path = [self._root]
-
-        self.feed(html_code)
-        for obj in self._path[1:]:
-            self._root._add_child(obj)
-
-        del self._path
+        
+        self.feed(''.join(map(str.strip, html_code.splitlines())))
+        self.handle_endtag(self._root.type)
+        self.close()
 
         self.find = self._root.find
         self.find_all = self._root.find_all
@@ -253,30 +261,29 @@ class Parser(HTMLParser):
     def text(self):
         return self._root.text
 
-    def handle_starttag(self, tag_type, attrs):
-        self._path.append(Tag(tag_type=tag_type, attrs=attrs))
+    def handle_starttag(self, tag, attrs):
+        self._path.append(Tag(tag=tag, attrs=attrs))
 
     def handle_endtag(self, tag_type):
         for pos, tag in tuple(enumerate(self._path))[::-1]:
-            if isinstance(tag, Tag) and tag.type == tag_type and tag.is_self_closing == None:
+            if isinstance(tag, Tag) and tag.type == tag_type and tag.is_self_closing is None:
                 tag.is_self_closing = False
 
                 for obj in self._path[pos + 1:]:
-                    if isinstance(obj, Tag):
-                        if obj.is_self_closing is None:
-                            obj.is_self_closing = True
+                    if isinstance(obj, Tag) and obj.is_self_closing is None:
+                        obj.is_self_closing = True
 
-                    tag._add_child(obj)
+                    tag._add_content(obj)
 
                 self._path = self._path[:pos + 1]
+
                 break
 
-    def handle_startendtag(self, tag_type, attrs):
-        self._path.append(Tag(tag_type=tag_type, attrs=attrs, is_self_closing=True))
+    def handle_startendtag(self, tag, attrs):
+        self._path.append(Tag(tag=tag, attrs=attrs, is_self_closing=True))
 
     def handle_decl(self, decl):
-        self.decl = Tag(tag_type=decl, is_decl=True)
-        self._path.append(self.decl)
+        self._path.append(Tag(tag='!'+decl, is_self_closing=True))
 
     def handle_data(self, text):
         self._path.append(text)
@@ -285,10 +292,11 @@ class Parser(HTMLParser):
         return self.attrs[key]
 
     def __getattr__(self, attr):
-        return self.find(tag_type=attr)
+        if not attr.startswith("__"):
+            return getattr(self._root, attr)
 
     def __repr__(self):
-        return ''.join(str(c) for c in self._root.children)
+        return ''.join(str(c) for c in self._root._content)
 
 
 if __name__ == '__main__':
