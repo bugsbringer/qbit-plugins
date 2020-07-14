@@ -1,9 +1,22 @@
-#VERSION: 0.19
+#VERSION: 0.20
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 
 EMAIL = "YOUR_EMAIL"
 PASSWORD = "YOUR_PASSWORD"
+
+proxy = {
+    'enable': False,
+
+    'proxy_urls': {
+        'http': 'ip:port',
+        'https': 'ip:port'
+    },
+
+    'auth': False,
+    'username': '',
+    'password': ''
+}
 
 ENABLE_PEERS_INFO = True
 
@@ -22,21 +35,35 @@ from io import BytesIO
 from random import randint
 from urllib import parse, request
 
-from helpers import retrieve_url
 from novaprinter import prettyPrinter
 
 STORAGE = os.path.abspath(os.path.dirname(__file__))
 
+# logging
 LOG_FORMAT = '[%(asctime)s] %(levelname)s:%(name)s:%(funcName)s - %(message)s'
 LOG_DT_FORMAT = '%d-%b-%y %H:%M:%S'
 
 if __name__ == '__main__':
-    logging.basicConfig(level='DEBUG', format=LOG_FORMAT, datefmt=LOG_DT_FORMAT)
+    logging.basicConfig(
+        level='DEBUG', 
+        format=LOG_FORMAT, 
+        datefmt=LOG_DT_FORMAT
+    )
 else:
-    logging.basicConfig(level='ERROR', filename=os.path.join(STORAGE, 'lostfilm.log'), format=LOG_FORMAT, datefmt=LOG_DT_FORMAT)
+    logging.basicConfig(
+        level='ERROR', 
+        filename=os.path.join(STORAGE, 'lostfilm.log'), 
+        format=LOG_FORMAT, 
+        datefmt=LOG_DT_FORMAT
+    )
 
 logger = logging.getLogger('lostfilm')
 logger.setLevel(logging.WARNING)
+
+#proxy
+if proxy['enable'] and proxy['auth']:
+    for scheme, proxy_url in proxy['proxy_urls'].items():
+        proxy[scheme] = '{}:{}@{}'.format(proxy['username'], proxy['password'], proxy_url)
 
 
 class lostfilm:
@@ -63,9 +90,9 @@ class lostfilm:
         self.session = Session()
         
     def search(self, what, cat='all'):
-        logger.info(what)
-
         self.torrents_count = 0
+
+        logger.info(what)
 
         if not self.session.is_actual: 
             self.pretty_printer({
@@ -96,11 +123,10 @@ class lostfilm:
 
                     elif len(params) == 2 and params[1] == 'fav':
                         self.get_new(fav=True)
-
         else:
             try:
-                req = request.Request(self.search_url_pattern.format(what=request.quote(what)))
-                search_result = request.urlopen(req).read().decode('utf-8')
+                url = self.search_url_pattern.format(what=request.quote(what))
+                search_result = self.session.request(url)
             except Exception as exp:
                 logger.error(exp)
 
@@ -118,18 +144,13 @@ class lostfilm:
     def get_new(self, fav=False, days=7):
         type = 99 if fav else 0
         today = datetime.now().date()
-
         self.dates = {}
 
-        page_number = 1
-
-        opener = request.build_opener()
-        params = parse.urlencode(self.session.cookies).encode('utf-8')
-
         with concurrent.futures.ThreadPoolExecutor() as executor:
+            page_number = 1
             while True:
                 url = self.new_url_pattern.format(page=page_number, type=type)
-                page = opener.open(url, params).read().decode('utf-8')
+                page = self.session.request(url)
 
                 rows = Parser(page).find_all('div', {'class': 'row'})
 
@@ -142,9 +163,9 @@ class lostfilm:
                     release_date_str = re.search(r'\d{2}.\d{2}.\d{4}', release_date_str)[0]
                     release_date = datetime.strptime(release_date_str, self.datetime_format).date()
 
-                    delta = today - release_date
+                    date_delta = today - release_date
 
-                    if delta.days > days:
+                    if date_delta.days > days:
                         return
 
                     href = '/'.join(row.a['href'].split('/')[:3])
@@ -159,14 +180,9 @@ class lostfilm:
                 page_number += 1
 
     def get_fav(self):
-        url = "https://www.lostfilm.tv/my/type_1"
-        opener = request.build_opener()
-        cookies = parse.urlencode(self.session.cookies).encode('utf-8')
-
-        page = opener.open(url, cookies).read().decode('utf-8')
+        page = self.session.request("https://www.lostfilm.tv/my/type_1")
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-
             for serial in Parser(page).find_all('div', {'class': 'serial-box'}):
                 href = serial.find('a', {'class': 'body'})['href']
                 executor.submit(self.get_episodes, href)
@@ -175,7 +191,7 @@ class lostfilm:
         self.prevs[serial_href] = []
         self.old_seasons[serial_href] = 0
 
-        serial_page = retrieve_url(self.serial_url_pattern.format(href=serial_href))
+        serial_page = self.session.request(self.serial_url_pattern.format(href=serial_href))
         with concurrent.futures.ThreadPoolExecutor() as executor:
             for button in Parser(serial_page).find_all('div', {'class': 'external-btn'}):
                 item_button = button.attrs.get('onclick')
@@ -187,6 +203,8 @@ class lostfilm:
 
     def get_torrents(self, href, code, new_episodes=False):
         season, episode = int(code[3:6]), int(code[6:])
+        desc_link = self.get_description_url(href, code)
+        date = ' [' + self.dates.pop(code, '') + ']' if new_episodes else ''
 
         if not new_episodes:
             rules = [
@@ -198,24 +216,16 @@ class lostfilm:
             if not any(rules):
                 return
 
-        url = self.download_url_pattern.format(code=code)
-
-        opener = request.build_opener(request.HTTPCookieProcessor(CookieJar()))
-        params = parse.urlencode(self.session.cookies).encode('utf-8')
-        redir_page = opener.open(url, params).read().decode('utf-8')
+        redir_page = self.session.request(self.download_url_pattern.format(code=code))
         torrent_page_url = re.search(r'(?<=location.replace\(").+(?="\);)', redir_page)
 
         if not torrent_page_url:
             return
         
-        torrent_page = retrieve_url(torrent_page_url[0])
-
-        desc_link = self.get_description_url(href, code)
+        torrent_page = self.session.request(torrent_page_url[0])
 
         logger.debug('desc_link = %s', desc_link)
         
-        date = ' [' + self.dates.pop(code, '') + ']' if new_episodes else ''
-
         with concurrent.futures.ThreadPoolExecutor() as executor:
             for torrent_tag in Parser(torrent_page).find_all('div', {'class': 'inner-box--item'}):
                 main = torrent_tag.find('div', {'class': 'inner-box--link main'}).a
@@ -245,8 +255,6 @@ class lostfilm:
                     future.add_done_callback(lambda f: self.pretty_printer(f.result()))
                 else:
                     self.pretty_printer(torrent_dict)
-                
-                self.torrents_count += 1
 
     def get_description_url(self, href, code):
         season, episode = int(code[3:6]), int(code[6:])
@@ -262,12 +270,12 @@ class lostfilm:
 
     def get_torrent_info(self, tdict):
         try:
-            req = request.urlopen(request.Request(tdict['link']))
+            response = self.session.request(tdict['link'], decode=False)
         except Exception as e:
             logger.error('torrent download: %s', e)
             return tdict
 
-        torrent = bdecode(req.read())
+        torrent = bdecode(response)
         info_hash = hashlib.sha1(bencode(torrent[b'info'])).digest()
 
         logger.debug('infohash = %s', info_hash)
@@ -282,13 +290,14 @@ class lostfilm:
             'compact': 1
         }
 
-        try:  
-            response = request.urlopen(torrent[b'announce'].decode('utf-8') + '?' + parse.urlencode(params))
+        try:
+            url = torrent[b'announce'].decode('utf-8') + '?' + parse.urlencode(params)
+            response = self.session.request(url, decode=False)
         except Exception as e:
             logger.error('peers info request: %s', e)
             return tdict
 
-        data = bdecode(response.read())
+        data = bdecode(response)
 
         tdict['seeds'] = data.get(b'complete', -1)
         tdict['leech'] = data.get(b'incomplete', 0) - 1
@@ -309,6 +318,7 @@ class lostfilm:
 
 
 class Session:
+    url = 'lostfilm.tv'
     file_name = 'lostfilm.json'
     datetime_format = '%m-%d-%y %H:%M:%S'
 
@@ -322,11 +332,12 @@ class Session:
 
     @property
     def file_path(self):
+        """path to file with session data"""
         return os.path.join(STORAGE, self.file_name)
 
     @property
     def is_actual(self):
-        """Needs to change session's token every 24 hours ot avoid captcha"""
+        """Checks the relevance of the token"""
 
         if self.token and self.time and not self._error:
             delta = datetime.now() - self.time
@@ -342,14 +353,50 @@ class Session:
         return {'lf_session': self.token}
 
     def __init__(self):
-        if os.path.exists(self.file_path):
-            self.load_data()
+        self.load_data()
             
         if not self.is_actual:
             if self.create_new():
                 self.save_data()
 
+    def request(self, url, params=None, decode=True):
+        args = [url]
+
+        try:
+            if proxy['enable'] and self.url in url:
+                opener = request.build_opener(
+                    request.ProxyBasicAuthHandler(),
+                    request.ProxyHandler(proxy['proxy_urls'])
+                )
+
+                logger.info('proxy used for "%s"', url)
+            else:
+                opener = request.build_opener()
+
+            # use cookies only for lostfilm site urls
+            if self.url in url:
+                if not params:
+                    params = self.cookies
+                else:
+                    params.update(self.cookies)
+
+            if params:
+                args.append(parse.urlencode(params).encode('utf-8'))
+
+            result = opener.open(*args).read()
+
+            if decode:
+                return result.decode('utf-8')
+            else:
+                return result
+
+        except Exception as e:
+            logger.error('%s url="%s" params="%s"' % (e, url, params))
+
     def load_data(self):
+        if not os.path.exists(self.file_path):
+            return
+
         with open(self.file_path, 'r') as file:
             result = json.load(file)
 
@@ -378,16 +425,26 @@ class Session:
         }
         
         url = "https://www.lostfilm.tv/ajaxik.php?"
-        
-        cj = CookieJar()
-        opener = request.build_opener(request.HTTPCookieProcessor(cj))
         params = parse.urlencode(login_data).encode('utf-8')
+        
+        cjar = CookieJar()
+        if proxy['enable']:
+            opener = request.build_opener(
+                request.ProxyHandler(proxy['proxy_urls']),
+                request.HTTPCookieProcessor(cjar)
+            )
+            logger.debug('proxy used')
+        else:
+            opener = request.build_opener(request.HTTPCookieProcessor(cjar))
+
         try:
-            result = json.loads(opener.open(url, params).read().decode('utf-8'))
+            response = opener.open(url, params).read().decode('utf-8')
         except Exception as e:
             self._error = 'Connection failed'
             logger.error('%s %s', self._error, e)
             return False
+
+        result = json.loads(response)
         
         if 'error' in result:
             self._error = 'Incorrect login data'
@@ -396,7 +453,7 @@ class Session:
             self._error = 'Captcha requested'
 
         else:
-            for cookie in cj:
+            for cookie in cjar:
                 if cookie.name == 'lf_session':
                     self.time = datetime.now()
                     self.token = cookie.value
@@ -424,18 +481,18 @@ class Session:
             json.dump(data, file)
 
     def datetime_to_string(self, dt_obj):
-        if type(dt_obj) is datetime:
+        if isinstance(dt_obj, datetime):
             return dt_obj.strftime(self.datetime_format)
 
         else:
-            raise TypeError('argument must be datetime')
+            raise TypeError('argument must be datetime, not %s' % (type(dt_obj)))
 
     def datetime_from_string(self, dt_string):
-        if type(dt_string) is str:
+        if isinstance(dt_string, str):
             return datetime.strptime(dt_string, self.datetime_format)
 
         else:
-            raise TypeError('argument must be str')
+            raise TypeError('argument must be str, not %s' % (type(dt_string)))
 
 
 class Tag:

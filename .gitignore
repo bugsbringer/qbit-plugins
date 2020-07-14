@@ -1,9 +1,11 @@
 *.json
 *.log
-__pycache__
-.vscode
+
 helpers.py
 novaprinter.py
 socks.py
+
+__pycache__
+.vscode
 install
-lf_new_design.py
+proxycheck
