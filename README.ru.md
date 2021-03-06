@@ -41,6 +41,12 @@
                 @new
                 @new:fav
 
+<strong><em>New in version 0.21<br>
+* Теперь вы можете изменить корневой адрес сайта, чтобы решить проблемы с блокировкой: <br>
+</em></strong>
+
+      SITE_URL = "https://www.lostfilm.tv"
+      
 Ошибки
 ------
 
