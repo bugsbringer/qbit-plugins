@@ -1,5 +1,6 @@
 *.json
 *.log
+*.bat
 
 helpers.py
 novaprinter.py
@@ -9,3 +10,4 @@ __pycache__
 .vscode
 install
 proxycheck
+venv
