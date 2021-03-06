@@ -67,17 +67,17 @@ if proxy['enable'] and proxy['auth']:
 
 
 class lostfilm:
-    url = 'https://www.lostfilm.tv'
+    url = 'https://www.lostfilm.uno'
     name = 'LostFilm'
     supported_categories = {'all': '0'}
 
-    search_url_pattern = 'https://www.lostfilm.tv/search/?q={what}'
-    serial_url_pattern = 'https://www.lostfilm.tv{href}/seasons'
-    download_url_pattern = 'https://www.lostfilm.tv/v_search.php?a={code}'
-    season_url_pattern = 'https://www.lostfilm.tv{href}/season_{season}'
-    episode_url_pattern = 'https://www.lostfilm.tv{href}/season_{season}/episode_{episode}/'
-    additional_url_pattern = 'https://www.lostfilm.tv{href}/additional/episode_{episode}/'
-    new_url_pattern = "https://www.lostfilm.tv/new/page_{page}/type_{type}"
+    search_url_pattern = 'https://www.lostfilm.uno/search/?q={what}'
+    serial_url_pattern = 'https://www.lostfilm.uno{href}/seasons'
+    download_url_pattern = 'https://www.lostfilm.uno/v_search.php?a={code}'
+    season_url_pattern = 'https://www.lostfilm.uno{href}/season_{season}'
+    episode_url_pattern = 'https://www.lostfilm.uno{href}/season_{season}/episode_{episode}/'
+    additional_url_pattern = 'https://www.lostfilm.uno{href}/additional/episode_{episode}/'
+    new_url_pattern = "https://www.lostfilm.uno/new/page_{page}/type_{type}"
 
     additional_season = 999
     all_episodes = 999
@@ -180,7 +180,7 @@ class lostfilm:
                 page_number += 1
 
     def get_fav(self):
-        page = self.session.request("https://www.lostfilm.tv/my/type_1")
+        page = self.session.request("https://www.lostfilm.uno/my/type_1")
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             for serial in Parser(page).find_all('div', {'class': 'serial-box'}):
@@ -318,7 +318,7 @@ class lostfilm:
 
 
 class Session:
-    url = 'lostfilm.tv'
+    url = 'lostfilm.uno'
     file_name = 'lostfilm.json'
     datetime_format = '%m-%d-%y %H:%M:%S'
 
@@ -424,7 +424,7 @@ class Session:
             "rem": 1
         }
         
-        url = "https://www.lostfilm.tv/ajaxik.php?"
+        url = "https://www.lostfilm.uno/ajaxik.php?"
         params = parse.urlencode(login_data).encode('utf-8')
         
         cjar = CookieJar()
