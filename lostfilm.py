@@ -195,7 +195,7 @@ class lostfilm:
         season, episode = int(code[3:6]), int(code[6:])
         
         if not any((
-			season > self.old_seasons[href],
+			season > self.old_seasons.get(href, -1),
 			episode == self.all_episodes,
 			season == self.additional_season,
 			new_episodes
