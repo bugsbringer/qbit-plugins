@@ -4,6 +4,7 @@
 
 EMAIL = "YOUR_EMAIL"
 PASSWORD = "YOUR_PASSWORD"
+ENABLE_PEERS_INFO = True
 
 proxy = {
     'enable': False,
@@ -17,9 +18,6 @@ proxy = {
     'username': '',
     'password': ''
 }
-
-ENABLE_PEERS_INFO = True
-
 
 import concurrent.futures
 import hashlib
@@ -37,33 +35,23 @@ from urllib import parse, request
 
 from novaprinter import prettyPrinter
 
+
 STORAGE = os.path.abspath(os.path.dirname(__file__))
+is_main = __name__ == '__main__'
 
 # logging
-LOG_FORMAT = '[%(asctime)s] %(levelname)s:%(name)s:%(funcName)s - %(message)s'
-LOG_DT_FORMAT = '%d-%b-%y %H:%M:%S'
+log_config = {
+    'level': 'DEBUG' if is_main else 'ERROR',
+    'format': '[%(asctime)s] %(levelname)s:%(name)s:%(funcName)s - %(message)s',
+    'datefmt': '%d-%b-%y %H:%M:%S'
+}
 
-if __name__ == '__main__':
-    logging.basicConfig(
-        level='DEBUG', 
-        format=LOG_FORMAT, 
-        datefmt=LOG_DT_FORMAT
-    )
-else:
-    logging.basicConfig(
-        level='ERROR', 
-        filename=os.path.join(STORAGE, 'lostfilm.log'), 
-        format=LOG_FORMAT, 
-        datefmt=LOG_DT_FORMAT
-    )
+if not is_main:
+    log_config.update({'filename': os.path.join(STORAGE, 'lostfilm.log')})
 
+logging.basicConfig(**log_config)
 logger = logging.getLogger('lostfilm')
 logger.setLevel(logging.WARNING)
-
-#proxy
-if proxy['enable'] and proxy['auth']:
-    for scheme, proxy_url in proxy['proxy_urls'].items():
-        proxy[scheme] = '{}:{}@{}'.format(proxy['username'], proxy['password'], proxy_url)
 
 
 class lostfilm:
@@ -86,7 +74,8 @@ class lostfilm:
     datetime_format = '%d.%m.%Y'
     units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB", "Б": "B"}
 
-    def __init__(self):
+    def __init__(self, output=True):
+        self.output = output
         self.session = Session()
         
     def search(self, what, cat='all'):
@@ -203,18 +192,14 @@ class lostfilm:
 
     def get_torrents(self, href, code, new_episodes=False):
         season, episode = int(code[3:6]), int(code[6:])
-        desc_link = self.get_description_url(href, code)
-        date = ' [' + self.dates.pop(code, '') + ']' if new_episodes else ''
-
-        if not new_episodes:
-            rules = [
-                season > self.old_seasons[href],
-                episode == self.all_episodes,
-                season == self.additional_season
-            ]
-
-            if not any(rules):
-                return
+        
+        if not any((
+			season > self.old_seasons[href],
+			episode == self.all_episodes,
+			season == self.additional_season,
+			new_episodes
+        )):
+            return
 
         redir_page = self.session.request(self.download_url_pattern.format(code=code))
         torrent_page_url = re.search(r'(?<=location.replace\(").+(?="\);)', redir_page)
@@ -223,9 +208,11 @@ class lostfilm:
             return
         
         torrent_page = self.session.request(torrent_page_url[0])
+        date = ' [' + self.dates.pop(code, '') + ']' if new_episodes else ''
+        desc_link = self.get_description_url(href, code)
 
         logger.debug('desc_link = %s', desc_link)
-        
+
         with concurrent.futures.ThreadPoolExecutor() as executor:
             for torrent_tag in Parser(torrent_page).find_all('div', {'class': 'inner-box--item'}):
                 main = torrent_tag.find('div', {'class': 'inner-box--link main'}).a
@@ -310,11 +297,10 @@ class lostfilm:
             logger.error(data)
         else:
             logger.debug(data)
+            self.torrents_count += 1
 
-        if __name__ != '__main__':
+        if self.output:
             prettyPrinter(dictionary)
-        
-        self.torrents_count += 1
 
 
 class Session:
@@ -385,10 +371,7 @@ class Session:
 
             result = opener.open(*args).read()
 
-            if decode:
-                return result.decode('utf-8')
-            else:
-                return result
+            return result if not decode else result.decode('utf-8')
 
         except Exception as e:
             logger.error('%s url="%s" params="%s"' % (e, url, params))
@@ -409,7 +392,7 @@ class Session:
     def create_new(self):
         self._error = None
 
-        if not EMAIL or not PASSWORD :
+        if not (EMAIL and PASSWORD):
             self._error = 'Incorrect login data'
             logger.error(self._error)
             return False
@@ -589,7 +572,7 @@ class Tag:
         starttag = ' '.join((self.type, attrs)) if attrs else self.type
 
         if self.is_self_closing:
-            return '<{starttag}>\n'.format(starttag=starttag)
+            return '<{}>\n'.format(starttag)
         else:
             nested = '\n' * bool(next(self.children, None)) + ''.join(map(str, self._content))
             return '<{}>{}</{}>\n'.format(starttag, nested, self.type)
@@ -749,7 +732,7 @@ if __name__ == '__main__':
                 logger.setLevel(logging.DEBUG)
             
             else:
-                print('%s [-d] "search_query"' % (__file__))
+                print('%s [-d] "search query"' % (__file__))
                 exit()
         else:
             logger.setLevel(logging.INFO)

@@ -34,6 +34,9 @@ class darklibria:
     units_dict = {"Тб": "TB", "Гб": "GB", "Мб": "MB", "Кб": "KB", "б": "B"}
     page_search_url_pattern = 'https://dark-libria.it/search?page={page}&find={what}'
 
+    def __init__(self, output=True):
+        self.output = output
+
     def search(self, what, cat='all'):
         logger.info(what)
 
@@ -132,11 +135,10 @@ class darklibria:
             logger.error(data)
         else:
             logger.debug(data)
+            self.torrents_count += 1
 
-        if __name__ != '__main__':
+        if self.output:
             prettyPrinter(dictionary)
-        
-        self.torrents_count += 1
 
 
 class Tag:
@@ -309,9 +311,8 @@ if __name__ == '__main__':
                 logger.setLevel(logging.DEBUG)
             
             else:
-                print('%s [-d] "search_query"' % (__file__))
-                exit()
+                exit('%s [-d] "search_query"' % (__file__))
         else:
             logger.setLevel(logging.INFO)
         
-        darklibria().search(sys.argv[-1])
+        darklibria(output=False).search(sys.argv[-1])
