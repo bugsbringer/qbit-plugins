@@ -45,6 +45,12 @@ LostFilm plugin features
 
             @new:fav
 
+* <strong><em>New in version 0.21<br>
+Now you can change site root url, to solve the blocking issies: <br>
+</em></strong>
+
+      SITE_URL = "https://www.lostfilm.tv"
+      
 Errors
 ------
 
