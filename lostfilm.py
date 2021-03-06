@@ -80,9 +80,11 @@ class lostfilm:
         self.session = Session()
         
     def search(self, what, cat='all'):
-        self.torrents_count = 0
-
         logger.info(what)
+
+        self.torrents_count = 0
+        self.prevs = {}
+        self.old_seasons = {}
 
         if not self.session.is_actual: 
             self.pretty_printer({
@@ -96,9 +98,6 @@ class lostfilm:
             })
 
             return False
-
-        self.prevs = {}
-        self.old_seasons = {}
 
         if parse.unquote(what).startswith('@'): 
             params = parse.unquote(what)[1:].split(':')
@@ -178,8 +177,8 @@ class lostfilm:
                 executor.submit(self.get_episodes, href)
 
     def get_episodes(self, serial_href):
-        self.prevs[serial_href] = []
-        self.old_seasons[serial_href] = 0
+        self.prevs.setdefault(serial_href, [])
+        self.prevs.setdefault(serial_href, 0)
 
         serial_page = self.session.request(self.serial_url_pattern.format(href=serial_href))
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -195,7 +194,7 @@ class lostfilm:
         season, episode = int(code[3:6]), int(code[6:])
         
         if not any((
-			season > self.old_seasons[href],
+			season > self.old_seasons.get(href, -1),
 			episode == self.all_episodes,
 			season == self.additional_season,
 			new_episodes
@@ -222,8 +221,8 @@ class lostfilm:
                 size, unit = re.search(r'\d+.\d+ \w\w(?=\.)', desc_box_text)[0].split()
 
                 if not new_episodes:
-                    if link in self.prevs[href]:
-                        self.old_seasons[href] = max(self.old_seasons[href], season)
+                    if link in self.prevs.get(href, ''):
+                        self.old_seasons[href] = max(self.old_seasons.get(href, 0), season)
                         break
                     
                     self.prevs[href].append(link)
@@ -293,11 +292,10 @@ class lostfilm:
         return tdict
     
     def pretty_printer(self, dictionary):
-        data = json.dumps(dictionary, sort_keys=True, indent=4)
         if dictionary['link'] == 'Error':
-            logger.error(data)
+            logger.error(dictionary)
         else:
-            logger.debug(data)
+            logger.debug(dictionary)
             self.torrents_count += 1
 
         if self.output:
