@@ -31,11 +31,10 @@ from datetime import datetime
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar
 from io import BytesIO
-from random import randint
+from time import time
 from urllib import parse, request
 
 from novaprinter import prettyPrinter
-
 
 STORAGE = os.path.abspath(os.path.dirname(__file__))
 is_main = __name__ == '__main__'
@@ -70,7 +69,7 @@ class lostfilm:
 
     additional_season = 999
     all_episodes = 999
-    peer_id = '-PC0001-' + ''.join([str(randint(0, 9)) for _ in range(12)])
+    peer_id = '-PC0001-' + str(time()).replace('.', '')[-12:]
 
     datetime_format = '%d.%m.%Y'
     units_dict = {"ТБ": "TB", "ГБ": "GB", "МБ": "MB", "КБ": "KB", "Б": "B"}
