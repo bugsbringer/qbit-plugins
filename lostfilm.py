@@ -1,10 +1,11 @@
-#VERSION: 0.20
+#VERSION: 0.21
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 
 EMAIL = "YOUR_EMAIL"
 PASSWORD = "YOUR_PASSWORD"
 ENABLE_PEERS_INFO = True
+SITE_URL = "https://www.lostfilm.tv"
 
 proxy = {
     'enable': False,
@@ -55,17 +56,17 @@ logger.setLevel(logging.WARNING)
 
 
 class lostfilm:
-    url = 'https://www.lostfilm.tv'
+    url = SITE_URL
     name = 'LostFilm'
     supported_categories = {'all': '0'}
 
-    search_url_pattern = 'https://www.lostfilm.tv/search/?q={what}'
-    serial_url_pattern = 'https://www.lostfilm.tv{href}/seasons'
-    download_url_pattern = 'https://www.lostfilm.tv/v_search.php?a={code}'
-    season_url_pattern = 'https://www.lostfilm.tv{href}/season_{season}'
-    episode_url_pattern = 'https://www.lostfilm.tv{href}/season_{season}/episode_{episode}/'
-    additional_url_pattern = 'https://www.lostfilm.tv{href}/additional/episode_{episode}/'
-    new_url_pattern = "https://www.lostfilm.tv/new/page_{page}/type_{type}"
+    search_url_pattern = SITE_URL + '/search/?q={what}'
+    serial_url_pattern = SITE_URL + '{href}/seasons'
+    download_url_pattern = SITE_URL + '/v_search.php?a={code}'
+    season_url_pattern = SITE_URL + '{href}/season_{season}'
+    episode_url_pattern = SITE_URL + '{href}/season_{season}/episode_{episode}/'
+    additional_url_pattern = SITE_URL + '{href}/additional/episode_{episode}/'
+    new_url_pattern = SITE_URL + '/new/page_{page}/type_{type}'
 
     additional_season = 999
     all_episodes = 999
@@ -169,7 +170,7 @@ class lostfilm:
                 page_number += 1
 
     def get_fav(self):
-        page = self.session.request("https://www.lostfilm.tv/my/type_1")
+        page = self.session.request(SITE_URL + '/my/type_1')
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             for serial in Parser(page).find_all('div', {'class': 'serial-box'}):
@@ -304,7 +305,7 @@ class lostfilm:
 
 
 class Session:
-    url = 'lostfilm.tv'
+    site_name = 'lostfilm'
     file_name = 'lostfilm.json'
     datetime_format = '%m-%d-%y %H:%M:%S'
 
@@ -349,7 +350,7 @@ class Session:
         args = [url]
 
         try:
-            if proxy['enable'] and self.url in url:
+            if proxy['enable'] and self.site_name in url:
                 opener = request.build_opener(
                     request.ProxyBasicAuthHandler(),
                     request.ProxyHandler(proxy['proxy_urls'])
@@ -360,7 +361,7 @@ class Session:
                 opener = request.build_opener()
 
             # use cookies only for lostfilm site urls
-            if self.url in url:
+            if self.site_name in url:
                 if not params:
                     params = self.cookies
                 else:
@@ -407,7 +408,7 @@ class Session:
             "rem": 1
         }
         
-        url = "https://www.lostfilm.tv/ajaxik.php?"
+        url = SITE_URL + '/ajaxik.php?'
         params = parse.urlencode(login_data).encode('utf-8')
         
         cjar = CookieJar()
