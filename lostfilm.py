@@ -1,4 +1,4 @@
-#VERSION: 0.21
+#VERSION: 0.22
 #AUTHORS: Bugsbringer (dastins193@gmail.com)
 
 
@@ -82,8 +82,8 @@ class lostfilm:
         logger.info(what)
 
         self.torrents_count = 0
-        self.prevs = {}
-        self.old_seasons = {}
+        self.prevs = set()
+        self.old_seasons = dict()
 
         if not self.session.is_actual: 
             self.pretty_printer({
@@ -176,8 +176,7 @@ class lostfilm:
                 executor.submit(self.get_episodes, href)
 
     def get_episodes(self, serial_href):
-        self.prevs.setdefault(serial_href, [])
-        self.prevs.setdefault(serial_href, 0)
+        self.old_seasons.setdefault(serial_href, 0)
 
         serial_page = self.session.request(self.serial_url_pattern.format(href=serial_href))
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -207,7 +206,7 @@ class lostfilm:
             return
         
         torrent_page = self.session.request(torrent_page_url[0])
-        date = ' [' + self.dates.pop(code, '') + ']' if new_episodes else ''
+        date = '' if not new_episodes else '[' + self.dates.pop(code, '') + ']'
         desc_link = self.get_description_url(href, code)
 
         logger.debug('desc_link = %s', desc_link)
@@ -215,17 +214,20 @@ class lostfilm:
         with concurrent.futures.ThreadPoolExecutor() as executor:
             for torrent_tag in Parser(torrent_page).find_all('div', {'class': 'inner-box--item'}):
                 main = torrent_tag.find('div', {'class': 'inner-box--link main'}).a
-                link, name = main['href'], main.text.replace('\n', ' ') + date
-                desc_box_text = torrent_tag.find('div', {'class': 'inner-box--desc'}).text
-                size, unit = re.search(r'\d+.\d+ \w\w(?=\.)', desc_box_text)[0].split()
+                link, name = main['href'], ' '.join((main.text.replace('\n', ' '), date))
 
                 if not new_episodes:
-                    if link in self.prevs.get(href, ''):
+                    if link in self.prevs:
                         self.old_seasons[href] = max(self.old_seasons.get(href, 0), season)
                         break
                     
-                    self.prevs[href].append(link)
-                
+                    self.prevs.add(link)
+
+                size, unit = re.search(
+                    r'\d+.\d+ \w\w(?=\.)', 
+                    torrent_tag.find('div', {'class': 'inner-box--desc'}).text
+                )[0].split()
+
                 torrent_dict = {
                     'link': link,
                     'name': name,
@@ -255,40 +257,48 @@ class lostfilm:
             return self.episode_url_pattern.format(href=href, season=season, episode=episode)
 
     def get_torrent_info(self, tdict):
-        try:
-            response = self.session.request(tdict['link'], decode=False)
-        except Exception as e:
-            logger.error('torrent download: %s', e)
+        response = self.session.request(tdict['link'], decode=False)
+        if not response:
             return tdict
 
-        torrent = bdecode(response)
-        info_hash = hashlib.sha1(bencode(torrent[b'info'])).digest()
+        torrent = self.decode_data(response)
+        torrent_info = self.encode_obj(torrent.get(b'info'))
+        if not torrent_info:
+            return tdict
 
-        logger.debug('infohash = %s', info_hash)
+        info_hash = hashlib.sha1(torrent_info).digest()
 
         params = {
             'peer_id': self.peer_id,
             'info_hash': info_hash,
             'port': 6881,
-            'left': 200075,
+            'left': 0,
             'downloaded': 0,
             'uploaded': 0,
             'compact': 1
         }
-
-        try:
-            url = torrent[b'announce'].decode('utf-8') + '?' + parse.urlencode(params)
-            response = self.session.request(url, decode=False)
-        except Exception as e:
-            logger.error('peers info request: %s', e)
-            return tdict
-
-        data = bdecode(response)
-
-        tdict['seeds'] = data.get(b'complete', -1)
-        tdict['leech'] = data.get(b'incomplete', 0) - 1
-
+        url = torrent[b'announce'].decode('utf-8') + '?' + parse.urlencode(params)
+        response = self.session.request(url, decode=False)
+        if response:
+            data = self.decode_data(response)
+            tdict['seeds'] = data.get(b'complete', 0) - 1
+            tdict['leech'] = data.get(b'incomplete', -1)
+        
         return tdict
+
+    def decode_data(self, data):
+        try:
+            return bdecode(data)
+        except Exception as e:
+            logger.error(e)
+            return dict()
+
+    def encode_obj(self, obj):
+        try:
+            return bencode(obj)
+        except Exception as e:
+            logger.error(e)
+            return b''
     
     def pretty_printer(self, dictionary):
         if dictionary['link'] == 'Error':
@@ -298,7 +308,10 @@ class lostfilm:
             self.torrents_count += 1
 
         if self.output:
-            prettyPrinter(dictionary)
+            try:
+                prettyPrinter(dictionary.copy())
+            except OSError as e:
+                logger.error('error %s on printing %s', e, dictionary)
 
 
 class Session:
@@ -735,4 +748,4 @@ if __name__ == '__main__':
         else:
             logger.setLevel(logging.INFO)
         
-        lostfilm().search(sys.argv[-1])
+        lostfilm(True).search(sys.argv[-1])
